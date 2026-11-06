@@ -13,3 +13,7 @@ keys/*.key
 .env
 results/*.json
 !results/.gitkeep
+examples/keys/
+examples/manifests/
+examples/agentwall.yaml
+examples/.agentwall/

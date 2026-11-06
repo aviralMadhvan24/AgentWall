@@ -78,6 +78,7 @@ class Decision:
 
 
 def _parse_condition(raw: Any, rule_id: str) -> Condition:
+    params: dict[str, Any]
     if isinstance(raw, str):
         name, params = raw, {}
     elif isinstance(raw, dict) and len(raw) == 1:
