@@ -52,6 +52,24 @@ def load_file_config(path: str | Path) -> FileConfig:
     return FileConfig(path, servers, raw)
 
 
+def _quarantine_config(raw: Any) -> Any:
+    """``quarantine: {targets: [web, files__read_file], extractor: rules | gemini, model: ...}``"""
+    if not raw:
+        return None
+    from agentwall.quarantine import LLMExtractor, QuarantineConfig, RuleExtractor
+
+    extractor: Any = RuleExtractor()
+    if raw.get("extractor", "rules") == "gemini":
+        from agentwall.agent.gemini import DEFAULT_MODEL, GeminiClient
+        from agentwall.agent.model import ThrottledClient
+
+        extractor = LLMExtractor(
+            ThrottledClient(GeminiClient(), rpm=float(raw.get("rpm", 8))),
+            raw.get("model", DEFAULT_MODEL),
+        )
+    return QuarantineConfig(tuple(raw.get("targets") or ()), extractor)
+
+
 def build_gateway(cfg: FileConfig) -> Gateway:
     raw = cfg.raw
     keys = [read_key(cfg.resolve(k)) for k in raw.get("public_keys", [])]
@@ -70,6 +88,7 @@ def build_gateway(cfg: FileConfig) -> Gateway:
     detector_name = raw.get("detector", "heuristic")
     detector = None if detector_name in (None, "none", False) else build_detector(detector_name)
     audit_path = raw.get("audit_log")
+    quarantine = _quarantine_config(raw.get("quarantine"))
     approvals = raw.get("approvals") or {}
     approver = None
     if approvals:
@@ -90,5 +109,6 @@ def build_gateway(cfg: FileConfig) -> Gateway:
         audit=AuditLog(cfg.resolve(audit_path) if audit_path else None),
         redact_outputs=tuple(sorted(resolve_kinds(raw.get("redact_outputs") or []))),
         approver=approver,
+        quarantine=quarantine,
     )
     return Gateway([s.backend() for s in cfg.servers], config)

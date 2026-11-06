@@ -13,12 +13,16 @@ Request path for ``call_tool``:
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Awaitable, Callable, Iterable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from typing import Any
 
+import anyio
+
+from agentwall.agent.model import RunStopped
 from agentwall.audit.log import AuditLog
 from agentwall.labels import TRUSTED_PUBLIC, Label
 from agentwall.policy.context import CallContext
@@ -26,6 +30,17 @@ from agentwall.policy.engine import Decision, Policy, RuleMatch
 from agentwall.policy.redact_args import redact_arguments
 from agentwall.provenance.attribution import ValueAttribution, attribute_args
 from agentwall.provenance.ledger import DetectorFn, Ledger, Span
+from agentwall.quarantine import (
+    EXTRACT_DESCRIPTION,
+    EXTRACT_SCHEMA,
+    EXTRACT_TOOL,
+    ExtractError,
+    QuarantineConfig,
+    QuarantinedDoc,
+    notice,
+    parse_fields,
+    validate,
+)
 from agentwall.redaction import redact
 from agentwall.registry.manifest import ToolPin
 from agentwall.registry.registry import Registry, ToolStatus
@@ -35,6 +50,9 @@ SEP = "__"
 
 # An approver answers an ``ask``: True/False, or (answer, note for the agent).
 Approver = Callable[[CallContext, Decision], Awaitable[bool | tuple[bool, str]]]
+
+
+BUILTIN_SERVER = "agentwall"
 
 
 def qualify(server: str, tool: str) -> str:
@@ -54,6 +72,7 @@ class GatewayConfig:
     approver: Approver | None = None
     audit: AuditLog = field(default_factory=AuditLog)
     redact_outputs: tuple[str, ...] = ()  # kinds masked in tool outputs, e.g. ("secrets",)
+    quarantine: QuarantineConfig | None = None  # untrusted outputs reach the agent as typed fields
 
 
 @dataclass
@@ -83,6 +102,7 @@ class CallOutcome:
     redactions: tuple[str, ...] = ()  # "path:kind" masked in the arguments
     output_redactions: tuple[str, ...] = ()  # kinds masked in the output
     approval_note: str = ""  # what the approver said about an ``ask``
+    quarantined: str | None = None  # vault handle when the output was quarantined
 
     @property
     def action(self) -> str:
@@ -113,10 +133,13 @@ class Session:
         cfg = gateway.config
         self.ledger = Ledger(detector=cfg.detector, flag_threshold=cfg.flag_threshold)
         self.calls: list[CallOutcome] = []
+        self.vault: dict[str, QuarantinedDoc] = {}
         for tool in gateway.visible_tools():
             # A description that still matches its signed pin was reviewed by the operator, so it is
-            # trusted. Anything else carries the server's output label.
-            reviewed = tool.pin is not None and tool.pin.matches(tool.info)
+            # trusted (as are AgentWall's own tools). Anything else carries the server's label.
+            reviewed = tool.server == BUILTIN_SERVER or (
+                tool.pin is not None and tool.pin.matches(tool.info)
+            )
             self.ledger.add(
                 tool.info.description,
                 kind="tool_description",
@@ -189,6 +212,10 @@ class Gateway:
                             "reason": status.reason,
                         }
                     )
+        if cfg.quarantine is not None:
+            info = ToolInfo("extract", EXTRACT_DESCRIPTION, EXTRACT_SCHEMA)
+            status = ToolStatus(BUILTIN_SERVER, "extract", "approved", "built-in")
+            tools[EXTRACT_TOOL] = ExposedTool(EXTRACT_TOOL, BUILTIN_SERVER, info, status, None)
         self.tools = tools
         return statuses
 
@@ -217,6 +244,8 @@ class Gateway:
             outcome = CallOutcome(qualified, arguments, decision, False, overhead_ms=_ms(start))
             self._audit(session, outcome, tool.server if tool else "?")
             return outcome
+        if qualified == EXTRACT_TOOL and cfg.quarantine is not None:
+            return await self._extract(session, arguments, start)
 
         pin = tool.pin
         ctx = CallContext(
@@ -257,6 +286,16 @@ class Gateway:
                 if out_found:
                     result = ToolResult(text, result.is_error)
                     outcome.output_redactions = tuple(f.kind for f in out_found)
+            if cfg.quarantine is not None and cfg.quarantine.covers(tool.server, tool.info.name):
+                doc = QuarantinedDoc(
+                    f"Q{len(session.vault) + 1}",
+                    f"{tool.server}/{tool.info.name}",
+                    result.text,
+                    self.label_for(tool.server, tool.info.name),
+                )
+                session.vault[doc.handle] = doc
+                result = ToolResult(notice(doc), result.is_error)
+                outcome.quarantined = doc.handle
             outcome.output_span = session.ledger.add(
                 result.text,
                 kind="tool_output",
@@ -267,6 +306,52 @@ class Gateway:
             outcome.executed, outcome.result = True, result
         outcome.overhead_ms = overhead
         self._audit(session, outcome, tool.server)
+        return outcome
+
+    async def _extract(
+        self, session: Session, arguments: dict[str, Any], start: float
+    ) -> CallOutcome:
+        """The built-in ``agentwall__extract`` tool: typed fields out of a quarantined document."""
+        cfg = self.config
+        assert cfg.quarantine is not None
+        handle = str(arguments.get("handle", ""))
+        doc = session.vault.get(handle)
+        extractor_ms = 0.0
+        try:
+            fields = parse_fields(arguments.get("fields"))
+            if doc is None:
+                known = ", ".join(session.vault) or "none yet"
+                raise ExtractError(f"no quarantined content named {handle!r} (handles: {known})")
+            t_ext = time.perf_counter()
+            raw = await anyio.to_thread.run_sync(
+                cfg.quarantine.extractor.extract,
+                doc.text,
+                fields,
+                str(arguments.get("question") or ""),
+            )
+            extractor_ms = _ms(t_ext)
+            detector = cfg.detector
+
+            def flagged(text: str) -> bool:
+                return detector is not None and detector(text) >= cfg.flag_threshold
+
+            text = json.dumps(validate(fields, raw, flagged), ensure_ascii=False)
+            result = ToolResult(text)
+        except RunStopped:
+            raise
+        except ExtractError as exc:
+            result = ToolResult(f"Error: {exc}", is_error=True)
+        except Exception as exc:  # a failing extractor must not take the session down
+            result = ToolResult(f"Error: extraction failed ({type(exc).__name__})", is_error=True)
+        outcome = CallOutcome(EXTRACT_TOOL, arguments, Decision("allow"), True, result=result)
+        outcome.output_span = session.ledger.add(
+            result.text,
+            kind="tool_output",
+            source=f"quarantine/{doc.source}" if doc else "quarantine",
+            label=doc.label if doc else TRUSTED_PUBLIC,
+        )
+        outcome.overhead_ms = _ms(start) - extractor_ms
+        self._audit(session, outcome, BUILTIN_SERVER)
         return outcome
 
     def _audit(self, session: Session, outcome: CallOutcome, server: str) -> None:
@@ -282,6 +367,7 @@ class Gateway:
                 "redactions": list(outcome.redactions),
                 "output_redactions": list(outcome.output_redactions),
                 "approval": outcome.approval_note or None,
+                "quarantined": outcome.quarantined,
                 "attributions": [a.to_dict() for a in outcome.attributions.values()],
                 "output_span": outcome.output_span.to_dict() if outcome.output_span else None,
                 "overhead_ms": round(outcome.overhead_ms, 3),

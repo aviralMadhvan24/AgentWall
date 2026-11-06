@@ -32,6 +32,7 @@ from agentwall.harness.corpus import build_corpus
 from agentwall.harness.judge import judge, payload_seen
 from agentwall.harness.scenario import Scenario
 from agentwall.policy.engine import Policy
+from agentwall.quarantine import LLMExtractor, QuarantineConfig, RuleExtractor
 from agentwall.registry.crypto import generate_keypair
 from agentwall.registry.manifest import Manifest
 from agentwall.registry.registry import Registry
@@ -47,7 +48,12 @@ class Ablation:
     detector: bool
     attribution: bool
     enforce_manifests: bool
+    quarantine: bool = False
+    default: bool = True  # run when no --configs are given
 
+
+# Outputs quarantined in the quarantine configuration: the untrusted servers and file contents.
+QUARANTINE_TARGETS = ("web", "weather", "files__read_file")
 
 ABLATIONS: tuple[Ablation, ...] = (
     Ablation("none", "No defence", "none", False, True, False),
@@ -56,6 +62,16 @@ ABLATIONS: tuple[Ablation, ...] = (
     Ablation("attribution", "Policies + attribution", "default", False, True, False),
     Ablation("full", "Full AgentWall", "default", True, True, True),
     Ablation("strict", "Full AgentWall, strict policy", "strict", True, True, True),
+    Ablation(
+        "quarantine",
+        "Full AgentWall + quarantine",
+        "default",
+        True,
+        True,
+        True,
+        quarantine=True,
+        default=False,
+    ),
 )
 
 
@@ -136,6 +152,13 @@ def _servers(scenario: Scenario, sink: Sink, weather_description: str) -> dict[s
     }
 
 
+def _quarantine(ablation: Ablation, agent: ModelAgentSpec | None) -> QuarantineConfig | None:
+    if not ablation.quarantine:
+        return None
+    extractor = LLMExtractor(agent.client, agent.model) if agent else RuleExtractor()
+    return QuarantineConfig(QUARANTINE_TARGETS, extractor)
+
+
 async def run_scenario(
     scenario: Scenario,
     ablation: Ablation,
@@ -167,6 +190,7 @@ async def run_scenario(
         detector=HeuristicDetector() if ablation.detector else None,
         attribution=ablation.attribution,
         enforce_manifests=ablation.enforce_manifests,
+        quarantine=_quarantine(ablation, agent),
     )
     async with Gateway([MCPBackend(n, s) for n, s in servers.items()], config) as gateway:
         await gateway.refresh()
@@ -215,7 +239,7 @@ async def run_suite(
     repeats: int = 1,
 ) -> list[ScenarioResult]:
     scenarios = build_corpus(suite)
-    ablations = [a for a in ABLATIONS if not configs or a.name in configs]
+    ablations = [a for a in ABLATIONS if (a.name in configs if configs else a.default)]
     unknown = set(configs or ()) - {a.name for a in ABLATIONS}
     if unknown:
         raise ValueError(

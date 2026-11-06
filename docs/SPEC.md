@@ -185,3 +185,23 @@ wait_seconds: N}`) files a request in a JSON store that operators answer with
 - `wait_seconds`: optionally wait for an answer before holding the call. No answer means no (fail
   closed). Repeated calls bump one pending request instead of filing new ones.
 - The store is written atomically, so the proxy, the CLI and the console can share it.
+
+## Quarantine (dual-LLM) mode
+
+With `quarantine: {targets: [web, files__read_file], extractor: rules | gemini}`, output from the listed
+servers or `server__tool` globs is stored in the session's vault under a handle (`Q1`, `Q2`, ...) and the
+agent receives a notice instead. The built-in tool `agentwall__extract(handle, fields, question?)` returns
+only typed fields, extracted by a model with no tools (`LLMExtractor`) or a deterministic fallback
+(`RuleExtractor`), then validated by the gateway:
+
+- `number`, `integer`, `boolean`, `date` (ISO), `email`, `url` must parse exactly; `enum` must be one of
+  the given options.
+- `string` is a single line, capped at `max_length` (default 120, at most 500), and dropped if the
+  detector flags it.
+
+The raw text never enters the ledger or the agent's context, so injected instructions have no free-text
+path to the agent. Extracted values keep the source's label (untrusted), so destination rules still apply.
+In the harness, the opt-in configuration `quarantine` (`--configs quarantine`) quarantines `web`,
+`weather` and `files__read_file`; with the obedient agent it measures exposure (saw-injection drops to
+0%). Utility with a real model must be measured with `--agent gemini`, where the model has to use the
+extract tool.
