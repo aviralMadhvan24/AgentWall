@@ -4,10 +4,11 @@ Request path for ``call_tool``:
 
 1. resolve the namespaced tool and refuse anything hidden by the registry
 2. attribute every argument to the context spans it came from
-3. evaluate the policy
-4. record the decision in the audit log
-5. on ``allow``, forward to the backend and label the output from the server's manifest
-   (the detector may downgrade it) before it re-enters the context
+3. evaluate the policy (an ``ask`` goes to the approver, if one is configured)
+4. on ``allow``/``redact``, mask what redact rules name, forward to the backend, mask configured
+   kinds in the output, and label the output from the server's manifest (the detector may downgrade
+   it) before it re-enters the context
+5. record the decision in the audit log
 """
 
 from __future__ import annotations
@@ -22,8 +23,10 @@ from agentwall.audit.log import AuditLog
 from agentwall.labels import TRUSTED_PUBLIC, Label
 from agentwall.policy.context import CallContext
 from agentwall.policy.engine import Decision, Policy, RuleMatch
+from agentwall.policy.redact_args import redact_arguments
 from agentwall.provenance.attribution import ValueAttribution, attribute_args
 from agentwall.provenance.ledger import DetectorFn, Ledger, Span
+from agentwall.redaction import redact
 from agentwall.registry.manifest import ToolPin
 from agentwall.registry.registry import Registry, ToolStatus
 from agentwall.types import ToolInfo, ToolResult
@@ -49,6 +52,7 @@ class GatewayConfig:
     unknown_capability: str = "egress"
     approver: Approver | None = None
     audit: AuditLog = field(default_factory=AuditLog)
+    redact_outputs: tuple[str, ...] = ()  # kinds masked in tool outputs, e.g. ("secrets",)
 
 
 @dataclass
@@ -74,6 +78,9 @@ class CallOutcome:
     attributions: dict[str, ValueAttribution] = field(default_factory=dict)
     output_span: Span | None = None
     overhead_ms: float = 0.0
+    sent_arguments: dict[str, Any] | None = None  # what the server received, after masking
+    redactions: tuple[str, ...] = ()  # "path:kind" masked in the arguments
+    output_redactions: tuple[str, ...] = ()  # kinds masked in the output
 
     @property
     def action(self) -> str:
@@ -81,6 +88,12 @@ class CallOutcome:
 
     def message_for_agent(self) -> str:
         if self.executed and self.result is not None:
+            if self.redactions:
+                kinds = ", ".join(sorted({r.rsplit(":", 1)[1] for r in self.redactions}))
+                return (
+                    f"{self.result.text}\n[AgentWall masked {len(self.redactions)} value(s) in "
+                    f"the arguments before sending: {kinds}]"
+                )
             return self.result.text
         reasons = "; ".join(m.reason or m.rule_id for m in self.decision.matches) or "policy"
         if self.decision.action == "ask":
@@ -223,8 +236,21 @@ class Gateway:
 
         outcome = CallOutcome(qualified, arguments, decision, False, attributions=ctx.attributions)
         if approved:
-            result = await self.backends[tool.server].call_tool(tool.info.name, arguments)
+            t_mask = time.perf_counter()
+            send = arguments
+            spec = decision.redaction()
+            if spec is not None:
+                send, found = redact_arguments(arguments, ctx, spec.kinds, spec.scope)
+                outcome.redactions = tuple(f"{path}:{f.kind}" for path, f in found)
+            outcome.sent_arguments = send
+            overhead += _ms(t_mask)
+            result = await self.backends[tool.server].call_tool(tool.info.name, send)
             t_label = time.perf_counter()
+            if cfg.redact_outputs:
+                text, out_found = redact(result.text, cfg.redact_outputs)
+                if out_found:
+                    result = ToolResult(text, result.is_error)
+                    outcome.output_redactions = tuple(f.kind for f in out_found)
             outcome.output_span = session.ledger.add(
                 result.text,
                 kind="tool_output",
@@ -247,6 +273,8 @@ class Gateway:
                 "action": outcome.action,
                 "executed": outcome.executed,
                 "rules": [m.rule_id for m in outcome.decision.matches],
+                "redactions": list(outcome.redactions),
+                "output_redactions": list(outcome.output_redactions),
                 "attributions": [a.to_dict() for a in outcome.attributions.values()],
                 "output_span": outcome.output_span.to_dict() if outcome.output_span else None,
                 "overhead_ms": round(outcome.overhead_ms, 3),

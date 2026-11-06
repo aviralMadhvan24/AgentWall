@@ -1,8 +1,17 @@
 """YAML policy engine.
 
 A policy is an ordered list of rules. A rule applies when its ``when`` selector matches the tool and all of
-its ``if`` predicates hold. Outcome precedence: block > ask > allow; with no matching rule, the policy's
-``default`` applies.
+its ``if`` predicates hold. Outcome precedence: block > ask > redact > allow; with no matching rule, the
+policy's ``default`` applies.
+
+``redact`` lets the call go ahead with secrets or personal data masked in its arguments. A redact rule
+may say what to mask::
+
+    action: redact
+    redact: {kinds: [secrets], scope: data}   # the default; scope "any" also covers control arguments
+
+Masking from every matching redact rule is applied whenever the call executes, including after a human
+approves an ``ask``.
 """
 
 from __future__ import annotations
@@ -17,9 +26,11 @@ import yaml
 
 from agentwall.policy.context import CallContext
 from agentwall.policy.predicates import PREDICATES
+from agentwall.redaction import resolve_kinds
 
-ACTIONS = ("allow", "ask", "block")
-_PRECEDENCE = {"allow": 0, "ask": 1, "block": 2}
+ACTIONS = ("allow", "redact", "ask", "block")
+_PRECEDENCE = {"allow": 0, "redact": 1, "ask": 2, "block": 3}
+REDACT_SCOPES = ("data", "any")
 
 
 class PolicyError(ValueError):
@@ -33,6 +44,12 @@ class Condition:
 
 
 @dataclass(frozen=True)
+class RedactSpec:
+    kinds: tuple[str, ...] = ("secrets",)
+    scope: str = "data"
+
+
+@dataclass(frozen=True)
 class Rule:
     id: str
     action: str
@@ -41,6 +58,7 @@ class Rule:
     tool_glob: str | None = None
     server_glob: str | None = None
     reason: str = ""
+    redact: RedactSpec | None = None
 
     def selects(self, ctx: CallContext) -> bool:
         if self.tool_classes is not None and ctx.capability not in self.tool_classes:
@@ -56,6 +74,7 @@ class RuleMatch:
     action: str
     reason: str
     details: tuple[str, ...]
+    redact: RedactSpec | None = None
 
 
 @dataclass(frozen=True)
@@ -65,7 +84,17 @@ class Decision:
 
     @property
     def allowed(self) -> bool:
-        return self.action == "allow"
+        """The call may run without a human: allowed outright or with masking."""
+        return self.action in ("allow", "redact")
+
+    def redaction(self) -> RedactSpec | None:
+        """What to mask if the call runs: the union of every matching redact rule."""
+        specs = [m.redact for m in self.matches if m.redact is not None]
+        if not specs:
+            return None
+        kinds = tuple(sorted({k for s in specs for k in s.kinds}))
+        scope = "any" if any(s.scope == "any" for s in specs) else "data"
+        return RedactSpec(kinds, scope)
 
     def explain(self) -> str:
         if not self.matches:
@@ -105,6 +134,20 @@ def _parse_rule(raw: dict[str, Any]) -> Rule:
     conditions = tuple(_parse_condition(c, rule_id) for c in raw.get("if") or [])
     if not conditions:
         raise PolicyError(f"rule {rule_id}: needs at least one condition under 'if'")
+    redact = None
+    if "redact" in raw and action != "redact":
+        raise PolicyError(f"rule {rule_id}: 'redact' options need action: redact")
+    if action == "redact":
+        spec = raw.get("redact") or {}
+        kinds = spec.get("kinds", ["secrets"])
+        scope = spec.get("scope", "data")
+        try:
+            resolve_kinds(kinds)
+        except ValueError as exc:
+            raise PolicyError(f"rule {rule_id}: {exc}") from exc
+        if scope not in REDACT_SCOPES:
+            raise PolicyError(f"rule {rule_id}: redact scope must be one of {REDACT_SCOPES}")
+        redact = RedactSpec(tuple(kinds), scope)
     return Rule(
         id=rule_id,
         action=action,
@@ -113,6 +156,7 @@ def _parse_rule(raw: dict[str, Any]) -> Rule:
         tool_glob=when.get("tool"),
         server_glob=when.get("server"),
         reason=raw.get("reason", ""),
+        redact=redact,
     )
 
 
@@ -157,7 +201,9 @@ class Policy:
                     break
                 details.append(detail)
             else:
-                matches.append(RuleMatch(rule.id, rule.action, rule.reason, tuple(details)))
+                matches.append(
+                    RuleMatch(rule.id, rule.action, rule.reason, tuple(details), rule.redact)
+                )
         if not matches:
             return Decision(self.default)
         action = max((m.action for m in matches), key=_PRECEDENCE.__getitem__)

@@ -125,3 +125,24 @@ def data_args_carry_untrusted_destinations(
             elif not hits and ctx.ledger.tainted():
                 found.append(f"{a.path} carries {entity} first seen after untrusted content")
     return (True, "; ".join(found)) if found else (False, "")
+
+
+@predicate("args_contain_secrets")
+def args_contain_secrets(ctx: CallContext, params: dict[str, Any]) -> tuple[bool, str]:
+    """Arguments carry a secret (or, with ``kinds: [pii]``, personal data) the user did not type.
+
+    ``kinds`` defaults to ``[secrets]``; ``scope: data`` (default) skips control arguments.
+    """
+    from agentwall.policy.redact_args import in_scope, user_supplied
+    from agentwall.redaction import find
+
+    kinds = params.get("kinds", ["secrets"])
+    scope = params.get("scope", "data")
+    found = [
+        f"{a.path} holds a {f.kind} not given by the user"
+        for a in ctx.attributions.values()
+        if in_scope(a.path, ctx, scope)
+        for f in find(a.value, kinds)
+        if not user_supplied(f.value, ctx.ledger)
+    ]
+    return (True, "; ".join(found)) if found else (False, "")

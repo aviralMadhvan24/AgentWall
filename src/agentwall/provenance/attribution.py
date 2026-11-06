@@ -73,7 +73,9 @@ def _summarise(path: str, value: str, spans: list[Span], method: str) -> ValueAt
         confidentiality=Confidentiality(max(s.label.confidentiality for s in spans)),
         method=method,
         sources=tuple(dict.fromkeys(s.id for s in spans)),
-        from_flagged=any(s.flagged for s in spans),
+        # Like integrity: a value the user typed is the user's, even if flagged content repeats it
+        # (e.g. a tool's "Email sent to <the user's contact>" confirmation).
+        from_flagged=any(s.flagged for s in spans) and not any(s.kind == "user" for s in spans),
     )
 
 

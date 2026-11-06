@@ -14,6 +14,7 @@ from agentwall.detector import build_detector
 from agentwall.gateway.backends import MCPBackend
 from agentwall.gateway.core import Gateway, GatewayConfig
 from agentwall.policy.engine import Policy
+from agentwall.redaction import resolve_kinds
 from agentwall.registry.crypto import read_key
 from agentwall.registry.registry import Registry
 
@@ -78,5 +79,6 @@ def build_gateway(cfg: FileConfig) -> Gateway:
         enforce_manifests=bool(raw.get("enforce_manifests", True)),
         destination_allowlist=tuple(raw.get("destination_allowlist", [])),
         audit=AuditLog(cfg.resolve(audit_path) if audit_path else None),
+        redact_outputs=tuple(sorted(resolve_kinds(raw.get("redact_outputs") or []))),
     )
     return Gateway([s.backend() for s in cfg.servers], config)

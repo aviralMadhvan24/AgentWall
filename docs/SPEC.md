@@ -25,7 +25,7 @@ equivalent non-MCP integrations across 847 scenarios.
 | 12 | Attack corpus generator | `agentwall.harness.corpus` |
 | 13 | Evaluation harness with ablations | `agentwall.harness` |
 
-Out of scope for v0.1: quarantine LLM, approvals UI, redaction, web console, policy simulator, multi-tenant.
+Out of scope for v0.1: multi-tenant. Added since: redaction, adaptive attacks, approvals service, quarantine LLM, policy simulator, console and telemetry (sections below).
 
 ## Labels
 
@@ -55,10 +55,32 @@ exact substring, then normalised (NFKC, casefold, whitespace, zero-width removed
 ## Policy
 
 Rules are YAML. Each has `id`, `when` (tool class, tool glob, server glob), `if` (list of named predicates, all
-must hold) and `action` (`block`, `ask`, `allow`). Precedence: block > ask > allow. Default: allow.
+must hold) and `action` (`block`, `ask`, `redact`, `allow`). Precedence: block > ask > redact > allow.
+Default: allow.
 
 Predicates: `control_args_untrusted`, `sensitive_data_to_unapproved_destination`, `session_tainted`,
-`session_has_flagged_span`, `args_from_flagged_span`, `server_untrusted`.
+`session_has_flagged_span`, `args_from_flagged_span`, `server_untrusted`,
+`data_args_carry_untrusted_destinations`, `args_contain_secrets`.
+
+## Redaction
+
+`redact` lets a call run with matches masked as `[REDACTED:<kind>]`. A redact rule names `kinds` (groups
+`secrets`, `pii`, or single kinds such as `aws_access_key`) and a `scope` (`data`: every argument except
+control arguments; `any`: all). Masks from every matching redact rule apply whenever the call executes,
+including after an approved `ask`. Provenance decides what is masked: a value the user typed is never
+masked, so "email my key sk-... to me" works, while the same key copied out of a file is masked.
+
+The default policy masks secrets in egress data (`secrets-stay-inside`). This closes a gap destination
+rules cannot: injected content asking the agent to paste a credential into an email to a contact the
+user named (harness category `secret_leak`). `redact_outputs` in the gateway config also masks the
+given kinds in tool outputs before they reach the agent.
+
+The harness counts an attack as successful only if the attacker's values reached the server; a masked
+legitimate call does not complete its step.
+
+Attribution note: a value the user typed is never marked as copied from flagged content, just as it
+stays trusted when an attacker repeats it (tool confirmations like "Email sent to <contact>" can trip
+the detector).
 
 ## Manifests
 

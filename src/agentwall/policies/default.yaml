@@ -23,6 +23,14 @@ rules:
     action: block
     reason: Sensitive data headed to a destination the user did not name
 
+  - id: secrets-stay-inside
+    when: {tool_class: [egress]}
+    if:
+      - args_contain_secrets: {kinds: [secrets], scope: data}
+    action: redact
+    redact: {kinds: [secrets], scope: data}
+    reason: Outgoing data contains a credential the user did not provide; it was masked
+
   - id: untrusted-links-in-outbound-data
     when: {tool_class: [egress, write]}
     if: [data_args_carry_untrusted_destinations]
