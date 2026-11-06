@@ -1,0 +1,44 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pytest:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(ruff:*)",
+      "Bash(mypy:*)",
+      "Bash(agentwall bench:*)",
+      "Bash(python -m agentwall:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ],
+    "deny": [
+      "Read(./keys/*.key)",
+      "Bash(git push --force:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ruff format --quiet src tests >/dev/null 2>&1; ruff check --fix --quiet src tests >/dev/null 2>&1; exit 0"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pytest -q -m 'not slow' -x >/tmp/agentwall-stop.log 2>&1 || { tail -30 /tmp/agentwall-stop.log >&2; echo 'Fast tests are failing. Fix them before finishing.' >&2; exit 2; }"
+          }
+        ]
+      }
+    ]
+  }
+}
