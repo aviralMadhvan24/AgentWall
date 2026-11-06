@@ -34,8 +34,8 @@ def summarise(results: list[ScenarioResult]) -> dict[str, Any]:
     for name, rows in by_config.items():
         attacks = [r for r in rows if r.kind == "attack"]
         benign = [r for r in rows if r.kind == "benign"]
-        benign_calls = sum(r.user_calls for r in benign)
-        benign_stopped = sum(r.user_calls - r.user_calls_completed for r in benign)
+        benign_calls = sum(r.legit_calls for r in benign)
+        benign_stopped = sum(r.legit_stopped for r in benign)
         overheads = [o for r in rows for o in r.overheads_ms]
         per_category: dict[str, dict[str, Any]] = {}
         for cat in sorted({r.category for r in rows}):

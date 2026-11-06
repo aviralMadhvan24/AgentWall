@@ -13,6 +13,7 @@ import anyio
 
 from agentwall.demo.manifests import signed_demo_manifest
 from agentwall.demo.servers import (
+    DEMO_TOOL_POLICY,
     Sink,
     make_email_server,
     make_files_server,
@@ -26,6 +27,7 @@ from agentwall.gateway.backends import MCPBackend
 from agentwall.gateway.core import Gateway, GatewayConfig
 from agentwall.harness.agent import ObedientAgent
 from agentwall.harness.corpus import build_corpus
+from agentwall.harness.judge import judge
 from agentwall.harness.scenario import Scenario
 from agentwall.policy.engine import Policy
 from agentwall.registry.crypto import generate_keypair
@@ -62,17 +64,20 @@ class ScenarioResult:
     category: str
     kind: str
     split: str
+    attack_attempted: bool | None
     attack_success: bool | None
     goal_action: str | None
     saw_payload: bool
-    user_calls: int
-    user_calls_completed: int
-    user_call_actions: list[str]
+    steps: int
+    steps_done: int
+    legit_calls: int
+    legit_stopped: int
+    legit_actions: list[str]
     overheads_ms: list[float] = field(default_factory=list)
 
     @property
     def task_completed(self) -> bool:
-        return self.user_calls_completed == self.user_calls
+        return self.steps_done == self.steps
 
 
 class _Keys:
@@ -85,6 +90,12 @@ class _Keys:
         if key not in self._cache:
             self._cache[key] = signed_demo_manifest(name, await backend.list_tools(), self.private)
         return self._cache[key]
+
+
+def demo_control_args(qualified: str) -> tuple[str, ...]:
+    server, _, tool = qualified.partition("__")
+    spec = DEMO_TOOL_POLICY.get(server, {}).get("tools", {}).get(tool)
+    return tuple(spec[1]) if spec else ()
 
 
 def _servers(scenario: Scenario, sink: Sink, weather_description: str) -> dict[str, Any]:
@@ -129,20 +140,23 @@ async def run_scenario(scenario: Scenario, ablation: Ablation, keys: _Keys) -> S
         session = gateway.new_session()
         run = await ObedientAgent(scenario).run(session)
 
-    calls = run.user_calls + ([run.goal_call] if run.goal_call else [])
+    verdict = judge(scenario, session.calls, demo_control_args)
     return ScenarioResult(
         config=ablation.name,
         scenario=scenario.id,
         category=scenario.category,
         kind=scenario.kind,
         split=scenario.split,
-        attack_success=(bool(run.goal_call and run.goal_call.executed) if attack else None),
-        goal_action=run.goal_call.action if run.goal_call else None,
+        attack_attempted=verdict.attack_attempted,
+        attack_success=verdict.attack_success,
+        goal_action=verdict.goal_action,
         saw_payload=run.saw_payload,
-        user_calls=len(run.user_calls),
-        user_calls_completed=sum(c.executed for c in run.user_calls),
-        user_call_actions=[c.action for c in run.user_calls],
-        overheads_ms=[round(c.overhead_ms, 4) for c in calls],
+        steps=verdict.steps,
+        steps_done=verdict.steps_done,
+        legit_calls=verdict.legit_calls,
+        legit_stopped=verdict.legit_stopped,
+        legit_actions=list(verdict.legit_actions),
+        overheads_ms=[round(c.overhead_ms, 4) for c in session.calls],
     )
 
 

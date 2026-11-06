@@ -51,7 +51,7 @@ async def test_attack_succeeds_without_defence_and_fails_with_agentwall():
 async def test_benign_user_named_email_completes_under_full():
     scenario = next(s for s in build_corpus("full") if s.category == "benign_email_user_named")
     result = await run_scenario(scenario, _by_name("full"), _Keys())
-    assert result.task_completed, result.user_call_actions
+    assert result.task_completed, result.legit_actions
 
 
 async def test_quick_suite_headline_numbers():
