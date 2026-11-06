@@ -221,3 +221,30 @@ cannot replay). Session ids carry a per-gateway random prefix so several gateway
 
 Fidelity: replaying a log against the policy that produced it reproduces every decision; the test suite
 checks this over the whole quick harness in four configurations.
+
+## Telemetry
+
+Sinks receive the same entries the audit log stores (`tool_call`, `tool_hidden`), never more:
+
+- `telemetry: {json_log: true}`: one JSON line per decision on stderr (stdout carries MCP in proxy mode);
+  no argument values.
+- `telemetry: {otel: {exporter: console | otlp, endpoint, service_name}}`: an OpenTelemetry span per
+  decision (`agentwall.tool_call`, status ERROR when blocked or held), a counter `agentwall.decisions`
+  by action and server, a counter `agentwall.tools_hidden`, and a histogram `agentwall.overhead` (ms).
+  Needs `pip install -e ".[otel]"`, plus `opentelemetry-exporter-otlp` for OTLP.
+
+A failing sink is reported on stderr and never affects the call.
+
+## Console
+
+`agentwall console --config agentwall.yaml` (or `--audit`, `--approvals`, `--policy`) serves a local
+page on `http://127.0.0.1:8765`: summary tiles and per-tool decisions, a live activity table (each row
+expands to its arguments with labels and attribution method), a source → tool data-flow graph coloured
+by the most severe decision, pending approvals with approve/deny (once or remembered), and the active
+policy. Standard library only; it re-reads the audit log when it changes.
+
+Security: the page inserts all data with `textContent` (arguments are attacker-controlled) under a
+strict CSP with no inline script or style; the server answers only requests whose `Host` is the bound
+address (DNS rebinding), approval POSTs need an `X-AgentWall-Console: 1` header (cannot be sent
+cross-site without a preflight the server never grants), and binding beyond localhost prints a warning
+because there is no login.

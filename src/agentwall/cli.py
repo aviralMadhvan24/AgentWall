@@ -300,6 +300,43 @@ def _cmd_simulate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_console(args: argparse.Namespace) -> int:
+    from importlib import resources
+
+    from agentwall.console import ConsoleApp, serve
+
+    audit, approvals, policy_ref = args.audit, args.approvals, args.policy
+    if args.config:
+        from agentwall.gateway.config import load_file_config
+
+        cfg = load_file_config(args.config)
+        raw = cfg.raw
+        if audit is None and raw.get("audit_log"):
+            audit = cfg.resolve(raw["audit_log"])
+        if approvals is None and raw.get("approvals"):
+            approvals = cfg.resolve(raw["approvals"].get("store", ".agentwall/approvals.json"))
+        if policy_ref is None:
+            ref = str(raw.get("policy", "default"))
+            policy_ref = str(cfg.resolve(ref)) if ref.endswith((".yaml", ".yml")) else ref
+    if audit is None:
+        print("give --audit or a --config with audit_log", file=sys.stderr)
+        return 2
+    policy_text, policy_name = "", ""
+    if policy_ref:
+        path = Path(policy_ref)
+        if path.suffix in (".yaml", ".yml") and path.exists():
+            policy_text, policy_name = path.read_text(encoding="utf-8"), path.name
+        else:
+            builtin = resources.files("agentwall.policies") / f"{policy_ref}.yaml"
+            if builtin.is_file():
+                policy_text, policy_name = (
+                    builtin.read_text(encoding="utf-8"),
+                    f"{policy_ref} (built-in)",
+                )
+    serve(ConsoleApp(audit, approvals, policy_text, policy_name), args.host, args.port)
+    return 0
+
+
 def _cmd_models(args: argparse.Namespace) -> int:
     from agentwall.agent.gemini import GeminiClient
 
@@ -399,6 +436,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--allow", nargs="*", default=None, help="draft destination allowlist")
     p.add_argument("--all", action="store_true", help="list unchanged decisions too")
     p.set_defaults(fn=_cmd_simulate)
+
+    p = sub.add_parser("console", help="local web console: decisions, flows, approvals")
+    p.add_argument(
+        "--config", default=None, help="gateway config: reads audit log, approvals, policy"
+    )
+    p.add_argument("--audit", default=None)
+    p.add_argument("--approvals", default=None)
+    p.add_argument("--policy", default=None)
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8765)
+    p.set_defaults(fn=_cmd_console)
 
     p = sub.add_parser("models", help="list Gemini models your API key can call")
     p.set_defaults(fn=_cmd_models)

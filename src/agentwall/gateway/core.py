@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import sys
 import time
 from collections.abc import Awaitable, Callable, Iterable
 from contextlib import AsyncExitStack
@@ -75,6 +76,7 @@ class GatewayConfig:
     redact_outputs: tuple[str, ...] = ()  # kinds masked in tool outputs, e.g. ("secrets",)
     quarantine: QuarantineConfig | None = None  # untrusted outputs reach the agent as typed fields
     audit_spans: bool = True  # log what enters the context, so the policy simulator can replay
+    telemetry: tuple[Any, ...] = ()  # sinks with emit(event): OpenTelemetry, JSON logs
 
 
 @dataclass
@@ -224,7 +226,7 @@ class Gateway:
                 tools[q] = ExposedTool(q, name, info, status, cfg.registry.pin_for(name, info.name))
                 statuses.append(status)
                 if not status.visible:
-                    cfg.audit.record(
+                    self._record(
                         {
                             "event": "tool_hidden",
                             "tool": q,
@@ -382,8 +384,17 @@ class Gateway:
         self._audit(session, outcome, BUILTIN_SERVER)
         return outcome
 
+    def _record(self, event: dict[str, Any]) -> None:
+        """Append to the audit log and hand the entry to every telemetry sink."""
+        entry = self.config.audit.record(event)
+        for sink in self.config.telemetry:
+            try:
+                sink.emit(entry)
+            except Exception as exc:  # telemetry must never break a tool call
+                print(f"agentwall: telemetry sink failed: {exc!r}", file=sys.stderr)
+
     def _audit(self, session: Session, outcome: CallOutcome, server: str) -> None:
-        self.config.audit.record(
+        self._record(
             {
                 "event": "tool_call",
                 "session": session.id,

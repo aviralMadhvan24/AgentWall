@@ -17,6 +17,7 @@ from agentwall.policy.engine import Policy
 from agentwall.redaction import resolve_kinds
 from agentwall.registry.crypto import read_key
 from agentwall.registry.registry import Registry
+from agentwall.telemetry import sinks_from_config
 
 
 @dataclass
@@ -110,5 +111,6 @@ def build_gateway(cfg: FileConfig) -> Gateway:
         redact_outputs=tuple(sorted(resolve_kinds(raw.get("redact_outputs") or []))),
         approver=approver,
         quarantine=quarantine,
+        telemetry=sinks_from_config(raw.get("telemetry")),
     )
     return Gateway([s.backend() for s in cfg.servers], config)

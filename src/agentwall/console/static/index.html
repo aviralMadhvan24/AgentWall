@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentWall Console</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">▣</span>
+      <h1>AgentWall</h1>
+      <span class="muted">console</span>
+    </div>
+    <div class="status">
+      <span id="chain" class="pill">checking audit chain…</span>
+      <span id="live" class="pill">live</span>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="overview" aria-selected="true">Overview</button>
+    <button role="tab" data-tab="activity">Activity</button>
+    <button role="tab" data-tab="flows">Data flows</button>
+    <button role="tab" data-tab="approvals">Approvals <span id="pending-count" class="count" hidden></span></button>
+    <button role="tab" data-tab="policy">Policy</button>
+  </nav>
+
+  <main>
+    <section id="tab-overview" class="tab">
+      <div id="tiles" class="tiles"></div>
+      <div class="grid2">
+        <div class="card">
+          <h2>Decisions by tool</h2>
+          <table class="table" id="by-tool">
+            <thead><tr><th>Tool</th><th>Allowed</th><th>Masked</th><th>Held</th><th>Blocked</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="card">
+          <h2>Rules that fired most</h2>
+          <ol id="top-rules" class="rules"></ol>
+          <h2 class="spaced">Hidden tools</h2>
+          <ul id="hidden" class="rules"></ul>
+        </div>
+      </div>
+      <p class="muted small" id="audit-path"></p>
+    </section>
+
+    <section id="tab-activity" class="tab" hidden>
+      <div class="toolbar">
+        <label>Show
+          <select id="filter">
+            <option value="">all decisions</option>
+            <option value="block">blocked</option>
+            <option value="ask">held</option>
+            <option value="redact">masked</option>
+            <option value="allow">allowed</option>
+          </select>
+        </label>
+        <span class="muted small">Newest first. Click a row for its arguments and where each came from.</span>
+      </div>
+      <div class="card flush">
+        <table class="table" id="activity">
+          <thead><tr><th>#</th><th>Time</th><th>Tool</th><th>Decision</th><th>Rules</th><th>Session</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="tab-flows" class="tab" hidden>
+      <div class="card">
+        <h2>Where tool arguments came from</h2>
+        <p class="muted small">Left: the source each argument was traced to. Right: the tool it was sent to. Line colour is the most severe decision on that path; thickness is the number of calls.</p>
+        <div id="flow-graph" class="flow"></div>
+        <div class="legend">
+          <span class="dot allow"></span>allowed <span class="dot redact"></span>masked
+          <span class="dot ask"></span>held <span class="dot block"></span>blocked
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-approvals" class="tab" hidden>
+      <p id="approvals-off" class="muted" hidden>No approvals store configured. Add <code>approvals: {store: .agentwall/approvals.json}</code> to the gateway config and start the console with <code>--config</code>.</p>
+      <div id="approvals"></div>
+    </section>
+
+    <section id="tab-policy" class="tab" hidden>
+      <div class="card">
+        <h2 id="policy-name">Policy</h2>
+        <pre id="policy-text" class="code"></pre>
+      </div>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
