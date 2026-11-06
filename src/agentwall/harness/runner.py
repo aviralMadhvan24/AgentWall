@@ -11,6 +11,8 @@ from typing import Any
 
 import anyio
 
+from agentwall.agent.loop import ToolAgent
+from agentwall.agent.model import CacheMiss, ModelClient, RunStopped
 from agentwall.demo.manifests import signed_demo_manifest
 from agentwall.demo.servers import (
     DEMO_TOOL_POLICY,
@@ -27,7 +29,7 @@ from agentwall.gateway.backends import MCPBackend
 from agentwall.gateway.core import Gateway, GatewayConfig
 from agentwall.harness.agent import ObedientAgent
 from agentwall.harness.corpus import build_corpus
-from agentwall.harness.judge import judge
+from agentwall.harness.judge import judge, payload_seen
 from agentwall.harness.scenario import Scenario
 from agentwall.policy.engine import Policy
 from agentwall.registry.crypto import generate_keypair
@@ -74,10 +76,35 @@ class ScenarioResult:
     legit_stopped: int
     legit_actions: list[str]
     overheads_ms: list[float] = field(default_factory=list)
+    agent: str = "obedient"
+    repeat: int = 0
+    stop: str = "scripted"
+    turns: int = 0
 
     @property
     def task_completed(self) -> bool:
         return self.steps_done == self.steps
+
+
+@dataclass(frozen=True)
+class ModelAgentSpec:
+    """Run scenarios with a real model instead of the obedient agent."""
+
+    client: ModelClient
+    model: str
+    max_turns: int = 10
+
+    @property
+    def name(self) -> str:
+        return f"gemini:{self.model}"
+
+
+class IncompleteRun(RuntimeError):
+    """The run stopped early (quota, budget or cache miss). Cached model calls make a re-run resume."""
+
+    def __init__(self, done: int, total: int, cause: RunStopped) -> None:
+        super().__init__(f"{done}/{total} scenario runs finished; stopped: {cause}")
+        self.done, self.total, self.cause = done, total, cause
 
 
 class _Keys:
@@ -109,7 +136,13 @@ def _servers(scenario: Scenario, sink: Sink, weather_description: str) -> dict[s
     }
 
 
-async def run_scenario(scenario: Scenario, ablation: Ablation, keys: _Keys) -> ScenarioResult:
+async def run_scenario(
+    scenario: Scenario,
+    ablation: Ablation,
+    keys: _Keys,
+    agent: ModelAgentSpec | None = None,
+    repeat: int = 0,
+) -> ScenarioResult:
     attack = scenario.attack
     approved_weather = CLEAN_WEATHER
     served_weather = CLEAN_WEATHER
@@ -138,7 +171,17 @@ async def run_scenario(scenario: Scenario, ablation: Ablation, keys: _Keys) -> S
     async with Gateway([MCPBackend(n, s) for n, s in servers.items()], config) as gateway:
         await gateway.refresh()
         session = gateway.new_session()
-        run = await ObedientAgent(scenario).run(session)
+        if agent is None:
+            run = await ObedientAgent(scenario).run(session)
+            saw, stop, turns = run.saw_payload, "scripted", len(scenario.steps)
+        else:
+            model_agent = ToolAgent(
+                agent.client, agent.model, max_turns=agent.max_turns, seed=repeat
+            )
+            transcript = await model_agent.run(session, scenario.user_prompt)
+            descriptions = [t.info.description for t in gateway.visible_tools()]
+            saw = payload_seen(scenario, session.calls, descriptions)
+            stop, turns = transcript.stop, transcript.turns
 
     verdict = judge(scenario, session.calls, demo_control_args)
     return ScenarioResult(
@@ -150,13 +193,17 @@ async def run_scenario(scenario: Scenario, ablation: Ablation, keys: _Keys) -> S
         attack_attempted=verdict.attack_attempted,
         attack_success=verdict.attack_success,
         goal_action=verdict.goal_action,
-        saw_payload=run.saw_payload,
+        saw_payload=saw,
         steps=verdict.steps,
         steps_done=verdict.steps_done,
         legit_calls=verdict.legit_calls,
         legit_stopped=verdict.legit_stopped,
         legit_actions=list(verdict.legit_actions),
         overheads_ms=[round(c.overhead_ms, 4) for c in session.calls],
+        agent=agent.name if agent else "obedient",
+        repeat=repeat,
+        stop=stop,
+        turns=turns,
     )
 
 
@@ -164,15 +211,29 @@ async def run_suite(
     suite: str = "quick",
     configs: list[str] | None = None,
     progress: Callable[[str], None] | None = None,
+    agent: ModelAgentSpec | None = None,
+    repeats: int = 1,
 ) -> list[ScenarioResult]:
     scenarios = build_corpus(suite)
     ablations = [a for a in ABLATIONS if not configs or a.name in configs]
+    unknown = set(configs or ()) - {a.name for a in ABLATIONS}
+    if unknown:
+        raise ValueError(
+            f"unknown configs {sorted(unknown)}; choose from {[a.name for a in ABLATIONS]}"
+        )
     keys = _Keys()
     results: list[ScenarioResult] = []
+    total = len(ablations) * len(scenarios) * repeats
     for ablation in ablations:
         start = time.perf_counter()
         for scenario in scenarios:
-            results.append(await run_scenario(scenario, ablation, keys))
+            for repeat in range(repeats):
+                try:
+                    results.append(await run_scenario(scenario, ablation, keys, agent, repeat))
+                except RunStopped as exc:
+                    raise IncompleteRun(len(results), total, exc) from exc
+                if agent and progress and len(results) % 10 == 0:
+                    progress(f"  {len(results)}/{total} scenario runs")
         if progress:
             progress(
                 f"{ablation.name:<14} {len(scenarios)} scenarios in {time.perf_counter() - start:.1f}s"
@@ -190,12 +251,37 @@ def _git_commit() -> str:
         return "unknown"
 
 
-def run_cli(suite: str = "quick", out: str = "results", configs: list[str] | None = None) -> int:
+def run_cli(
+    suite: str = "quick",
+    out: str = "results",
+    configs: list[str] | None = None,
+    agent: ModelAgentSpec | None = None,
+    repeats: int = 1,
+) -> int:
     from agentwall.harness.report import summarise, write_outputs
 
-    results = anyio.run(lambda: run_suite(suite, configs, progress=print))
+    try:
+        results = anyio.run(lambda: run_suite(suite, configs, print, agent, repeats))
+    except IncompleteRun as exc:
+        print()
+        print(f"Stopped early: {exc}")
+        if isinstance(exc.cause, CacheMiss):
+            print(
+                "Replay-only runs need every response cached; drop --replay-only to fetch the rest."
+            )
+        else:
+            print("Finished model calls are cached; run the same command again to resume.")
+        return 3
     summary = summarise(results)
-    write_outputs(Path(out), suite, results, summary, _git_commit())
+    write_outputs(
+        Path(out),
+        suite,
+        results,
+        summary,
+        _git_commit(),
+        agent.name if agent else "obedient",
+        repeats,
+    )
     print()
     print((Path(out) / "latest.md").read_text(encoding="utf-8"))
     return 0

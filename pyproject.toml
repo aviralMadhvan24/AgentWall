@@ -32,7 +32,10 @@ packages = ["src/agentwall"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-markers = ["slow: end-to-end tests that spawn subprocesses"]
+markers = [
+  "slow: end-to-end tests that spawn subprocesses",
+  "live: calls a real model API (skipped without a key)",
+]
 
 [tool.ruff]
 line-length = 100

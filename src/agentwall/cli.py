@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import anyio
 import yaml
@@ -137,10 +139,53 @@ def _cmd_demo_setup(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_bench(args: argparse.Namespace) -> int:
-    from agentwall.harness.runner import run_cli
+def _model_client(args: argparse.Namespace) -> Any:
+    """Cache -> throttle -> Gemini. In replay-only mode no key is needed and nothing is sent."""
+    from agentwall.agent.model import CachedClient, ThrottledClient
 
-    return run_cli(suite=args.suite, out=args.out, configs=args.configs)
+    inner = None
+    if not args.replay_only:
+        from agentwall.agent.gemini import GeminiClient
+
+        inner = ThrottledClient(GeminiClient(), rpm=args.rpm, budget=args.budget)
+    return CachedClient(inner, args.cache, replay_only=args.replay_only)
+
+
+def _add_model_args(p: argparse.ArgumentParser, default_cache: str) -> None:
+    from agentwall.agent.gemini import DEFAULT_MODEL
+
+    p.add_argument("--model", default=os.environ.get("AGENTWALL_GEMINI_MODEL", DEFAULT_MODEL))
+    p.add_argument("--cache", default=default_cache, help="JSONL cache of model responses")
+    p.add_argument("--replay-only", action="store_true", help="never call the API; use the cache")
+    p.add_argument("--rpm", type=float, default=8.0, help="max model requests per minute")
+    p.add_argument("--budget", type=int, default=0, help="max API calls this run (0: no limit)")
+    p.add_argument("--max-turns", type=int, default=10)
+
+
+def _cmd_bench(args: argparse.Namespace) -> int:
+    from agentwall.harness.runner import ModelAgentSpec, run_cli
+
+    if args.agent == "obedient":
+        return run_cli(suite=args.suite, out=args.out or "results", configs=args.configs)
+    client = _model_client(args)
+    spec = ModelAgentSpec(client, args.model, max_turns=args.max_turns)
+    code = run_cli(
+        suite=args.suite,
+        out=args.out or "results/gemini",
+        configs=args.configs or ["none", "full"],
+        agent=spec,
+        repeats=args.repeats,
+    )
+    print(f"model cache: {client.hits} hits, {client.misses} new calls, {len(client)} entries")
+    return code
+
+
+def _cmd_models(args: argparse.Namespace) -> int:
+    from agentwall.agent.gemini import GeminiClient
+
+    for name in GeminiClient().list_models():
+        print(name)
+    return 0
 
 
 def _cmd_audit_verify(args: argparse.Namespace) -> int:
@@ -188,9 +233,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("bench", help="run the evaluation harness")
     p.add_argument("--suite", default="quick", choices=["quick", "full"])
-    p.add_argument("--out", default="results")
+    p.add_argument(
+        "--out", default=None, help="results directory (default: results, or results/gemini)"
+    )
     p.add_argument("--configs", nargs="*", help="subset of ablation configs to run")
+    p.add_argument("--agent", default="obedient", choices=["obedient", "gemini"])
+    p.add_argument("--repeats", type=int, default=1, help="runs per scenario (model agents)")
+    _add_model_args(p, "results/gemini/cache.jsonl")
     p.set_defaults(fn=_cmd_bench)
+
+    p = sub.add_parser("models", help="list Gemini models your API key can call")
+    p.set_defaults(fn=_cmd_models)
 
     p = sub.add_parser("audit-verify", help="check an audit log's hash chain")
     p.add_argument("path")

@@ -1,7 +1,7 @@
-time,commit,suite,config,asr,utility,fpr,overhead_p95_ms
-2026-11-06T13:51:22,f969669,full,none,100.0,100.0,0.0,0.436
-2026-11-06T13:51:22,f969669,full,detector_only,28.3,90.0,4.3,0.732
-2026-11-06T13:51:22,f969669,full,lowwater,0.0,20.0,34.3,0.308
-2026-11-06T13:51:22,f969669,full,attribution,0.0,90.0,4.3,0.437
-2026-11-06T13:51:22,f969669,full,full,0.0,90.0,4.3,0.723
-2026-11-06T13:51:22,f969669,full,strict,0.0,26.7,31.4,0.765
+time,commit,suite,agent,config,asr,utility,fpr,overhead_p95_ms
+2026-11-06T13:51:22,f969669,full,obedient,none,100.0,100.0,0.0,0.436
+2026-11-06T13:51:22,f969669,full,obedient,detector_only,28.3,90.0,4.3,0.732
+2026-11-06T13:51:22,f969669,full,obedient,lowwater,0.0,20.0,34.3,0.308
+2026-11-06T13:51:22,f969669,full,obedient,attribution,0.0,90.0,4.3,0.437
+2026-11-06T13:51:22,f969669,full,obedient,full,0.0,90.0,4.3,0.723
+2026-11-06T13:51:22,f969669,full,obedient,strict,0.0,26.7,31.4,0.765
