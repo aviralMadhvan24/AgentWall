@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -228,6 +229,54 @@ def _cmd_adaptive(args: argparse.Namespace) -> int:
     return code
 
 
+def _approval_store(args: argparse.Namespace) -> Any:
+    from agentwall.approvals import ApprovalStore
+
+    path = args.store
+    if path is None and args.config:
+        from agentwall.gateway.config import load_file_config
+
+        cfg = load_file_config(args.config)
+        path = cfg.resolve(
+            (cfg.raw.get("approvals") or {}).get("store", ".agentwall/approvals.json")
+        )
+    return ApprovalStore(path or ".agentwall/approvals.json")
+
+
+def _cmd_approvals(args: argparse.Namespace) -> int:
+    from agentwall.approvals import approval_summary
+
+    store = _approval_store(args)
+    if args.action == "list":
+        rows = store.all() if args.all else store.pending()
+        if not rows:
+            print("no pending approval requests" if not args.all else "no approval requests")
+        for r in rows:
+            s = approval_summary(r)
+            control = ", ".join(f"{k}={v!r}" for k, v in s["control"].items()) or "-"
+            print(f"{s['id']}  {s['status']:<20} {s['tool']:<28} {control}")
+            for reason in s["reasons"]:
+                print(f"        why: {reason}")
+        return 0
+    if not args.id:
+        print("give a request id", file=sys.stderr)
+        return 2
+    try:
+        if args.action == "show":
+            print(json.dumps(approval_summary(store.get(args.id)), indent=1))
+        elif args.action == "forget":
+            store.forget(args.id)
+            print(f"forgot {args.id}")
+        else:
+            req = store.decide(args.id, args.action == "approve", remember=args.remember)
+            how = "always" if req.remember else "once"
+            print(f"{req.id} {req.status} ({how}) for {req.server}/{req.tool}")
+    except KeyError as exc:
+        print(exc.args[0], file=sys.stderr)
+        return 1
+    return 0
+
+
 def _cmd_models(args: argparse.Namespace) -> int:
     from agentwall.agent.gemini import GeminiClient
 
@@ -309,6 +358,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", default="results/adaptive")
     _add_model_args(p, "results/adaptive/cache.jsonl")
     p.set_defaults(fn=_cmd_adaptive)
+
+    p = sub.add_parser("approvals", help="list and answer calls held for approval")
+    p.add_argument("action", choices=["list", "show", "approve", "deny", "forget"])
+    p.add_argument("id", nargs="?")
+    p.add_argument("--remember", action="store_true", help="apply to all future identical calls")
+    p.add_argument("--all", action="store_true", help="list decided requests too")
+    p.add_argument(
+        "--store", default=None, help="default: from --config, else .agentwall/approvals.json"
+    )
+    p.add_argument("--config", default=None)
+    p.set_defaults(fn=_cmd_approvals)
 
     p = sub.add_parser("models", help="list Gemini models your API key can call")
     p.set_defaults(fn=_cmd_models)

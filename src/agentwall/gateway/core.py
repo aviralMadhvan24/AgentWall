@@ -33,7 +33,8 @@ from agentwall.types import ToolInfo, ToolResult
 
 SEP = "__"
 
-Approver = Callable[[CallContext, Decision], Awaitable[bool]]
+# An approver answers an ``ask``: True/False, or (answer, note for the agent).
+Approver = Callable[[CallContext, Decision], Awaitable[bool | tuple[bool, str]]]
 
 
 def qualify(server: str, tool: str) -> str:
@@ -81,6 +82,7 @@ class CallOutcome:
     sent_arguments: dict[str, Any] | None = None  # what the server received, after masking
     redactions: tuple[str, ...] = ()  # "path:kind" masked in the arguments
     output_redactions: tuple[str, ...] = ()  # kinds masked in the output
+    approval_note: str = ""  # what the approver said about an ``ask``
 
     @property
     def action(self) -> str:
@@ -97,7 +99,8 @@ class CallOutcome:
             return self.result.text
         reasons = "; ".join(m.reason or m.rule_id for m in self.decision.matches) or "policy"
         if self.decision.action == "ask":
-            return f"AgentWall held this call for human approval: {reasons}"
+            note = f" {self.approval_note}" if self.approval_note else ""
+            return f"AgentWall held this call for human approval: {reasons}.{note}"
         return f"AgentWall blocked this call: {reasons}"
 
 
@@ -231,10 +234,13 @@ class Gateway:
         overhead = _ms(start)
 
         approved = decision.allowed
+        note = ""
         if decision.action == "ask" and cfg.approver is not None:
-            approved = await cfg.approver(ctx, decision)
+            answer = await cfg.approver(ctx, decision)
+            approved, note = answer if isinstance(answer, tuple) else (answer, "")
 
         outcome = CallOutcome(qualified, arguments, decision, False, attributions=ctx.attributions)
+        outcome.approval_note = note
         if approved:
             t_mask = time.perf_counter()
             send = arguments
@@ -275,6 +281,7 @@ class Gateway:
                 "rules": [m.rule_id for m in outcome.decision.matches],
                 "redactions": list(outcome.redactions),
                 "output_redactions": list(outcome.output_redactions),
+                "approval": outcome.approval_note or None,
                 "attributions": [a.to_dict() for a in outcome.attributions.values()],
                 "output_span": outcome.output_span.to_dict() if outcome.output_span else None,
                 "overhead_ms": round(outcome.overhead_ms, 3),

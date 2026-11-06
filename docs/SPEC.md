@@ -170,3 +170,18 @@ URL, path), otherwise it is a different attack.
 plus the quick suite's benign scenarios through every ablation, so it is part of the regular harness.
 Expected result: keyword detection degrades sharply under rewriting; provenance does not depend on
 wording.
+
+## Approvals service
+
+An `ask` goes to the configured approver. `StoreApprover` (config: `approvals: {store: <path>,
+wait_seconds: N}`) files a request in a JSON store that operators answer with
+`agentwall approvals list|show|approve|deny|forget` or from the console.
+
+- Fingerprint: server, tool, the `ask` rules that matched and the normalised values of the control
+  arguments; never the payload. Approving mail to one recipient never approves another.
+- One-time approval: lets exactly one matching call through. In proxy mode the agent is told the
+  request id, the user approves, the agent retries.
+- `--remember`: the decision (approve or deny) answers every future matching call.
+- `wait_seconds`: optionally wait for an answer before holding the call. No answer means no (fail
+  closed). Repeated calls bump one pending request instead of filing new ones.
+- The store is written atomically, so the proxy, the CLI and the console can share it.

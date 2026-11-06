@@ -70,6 +70,15 @@ def build_gateway(cfg: FileConfig) -> Gateway:
     detector_name = raw.get("detector", "heuristic")
     detector = None if detector_name in (None, "none", False) else build_detector(detector_name)
     audit_path = raw.get("audit_log")
+    approvals = raw.get("approvals") or {}
+    approver = None
+    if approvals:
+        from agentwall.approvals import ApprovalStore, StoreApprover
+
+        approver = StoreApprover(
+            ApprovalStore(cfg.resolve(approvals.get("store", ".agentwall/approvals.json"))),
+            wait_seconds=float(approvals.get("wait_seconds", 0)),
+        )
     config = GatewayConfig(
         policy=policy,
         registry=registry,
@@ -80,5 +89,6 @@ def build_gateway(cfg: FileConfig) -> Gateway:
         destination_allowlist=tuple(raw.get("destination_allowlist", [])),
         audit=AuditLog(cfg.resolve(audit_path) if audit_path else None),
         redact_outputs=tuple(sorted(resolve_kinds(raw.get("redact_outputs") or []))),
+        approver=approver,
     )
     return Gateway([s.backend() for s in cfg.servers], config)
