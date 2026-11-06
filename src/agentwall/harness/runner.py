@@ -13,6 +13,7 @@ import anyio
 
 from agentwall.agent.loop import ToolAgent
 from agentwall.agent.model import CacheMiss, ModelClient, RunStopped
+from agentwall.audit.log import AuditLog
 from agentwall.demo.manifests import signed_demo_manifest
 from agentwall.demo.servers import (
     DEMO_TOOL_POLICY,
@@ -165,6 +166,7 @@ async def run_scenario(
     keys: _Keys,
     agent: ModelAgentSpec | None = None,
     repeat: int = 0,
+    audit: AuditLog | None = None,
 ) -> ScenarioResult:
     attack = scenario.attack
     approved_weather = CLEAN_WEATHER
@@ -191,6 +193,7 @@ async def run_scenario(
         attribution=ablation.attribution,
         enforce_manifests=ablation.enforce_manifests,
         quarantine=_quarantine(ablation, agent),
+        audit=audit if audit is not None else AuditLog(),
     )
     async with Gateway([MCPBackend(n, s) for n, s in servers.items()], config) as gateway:
         await gateway.refresh()

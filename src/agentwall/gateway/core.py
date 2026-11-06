@@ -14,6 +14,7 @@ Request path for ``call_tool``:
 from __future__ import annotations
 
 import json
+import secrets
 import time
 from collections.abc import Awaitable, Callable, Iterable
 from contextlib import AsyncExitStack
@@ -73,6 +74,7 @@ class GatewayConfig:
     audit: AuditLog = field(default_factory=AuditLog)
     redact_outputs: tuple[str, ...] = ()  # kinds masked in tool outputs, e.g. ("secrets",)
     quarantine: QuarantineConfig | None = None  # untrusted outputs reach the agent as typed fields
+    audit_spans: bool = True  # log what enters the context, so the policy simulator can replay
 
 
 @dataclass
@@ -103,6 +105,7 @@ class CallOutcome:
     output_redactions: tuple[str, ...] = ()  # kinds masked in the output
     approval_note: str = ""  # what the approver said about an ``ask``
     quarantined: str | None = None  # vault handle when the output was quarantined
+    context: dict[str, Any] | None = None  # policy inputs besides the ledger, for replays
 
     @property
     def action(self) -> str:
@@ -131,7 +134,11 @@ class Session:
         self.id = session_id
         self.gateway = gateway
         cfg = gateway.config
-        self.ledger = Ledger(detector=cfg.detector, flag_threshold=cfg.flag_threshold)
+        self.ledger = Ledger(
+            detector=cfg.detector,
+            flag_threshold=cfg.flag_threshold,
+            on_add=self._audit_span if cfg.audit_spans else None,
+        )
         self.calls: list[CallOutcome] = []
         self.vault: dict[str, QuarantinedDoc] = {}
         for tool in gateway.visible_tools():
@@ -146,6 +153,18 @@ class Session:
                 source=f"{tool.server}/{tool.info.name}",
                 label=TRUSTED_PUBLIC if reviewed else gateway.label_for(tool.server),
             )
+
+    def _audit_span(self, span: Span) -> None:
+        record: dict[str, Any] = {
+            "event": "span",
+            "session": self.id,
+            "span": {**span.to_dict(), "seq": span.seq, "entities": sorted(span.entities)},
+        }
+        if span.kind == "user":
+            # What the user typed decides what stays trusted and what is never masked; keep the
+            # normalised text (capped) so replays agree with the live decision.
+            record["span"]["norm"] = span.norm[:4096]
+        self.gateway.config.audit.record(record)
 
     def add_user_message(self, text: str) -> Span:
         return self.ledger.add(text, kind="user", source="user", label=TRUSTED_PUBLIC)
@@ -167,6 +186,7 @@ class Gateway:
         self.config = config or GatewayConfig()
         self.tools: dict[str, ExposedTool] = {}
         self._sessions = 0
+        self._instance = secrets.token_hex(3)
         self._stack: AsyncExitStack | None = None
 
     # -- lifecycle ----------------------------------------------------------------------------
@@ -227,7 +247,8 @@ class Gateway:
 
     def new_session(self) -> Session:
         self._sessions += 1
-        return Session(self, f"session-{self._sessions}")
+        # Unique across gateways and restarts that share one audit log.
+        return Session(self, f"s-{self._instance}-{self._sessions}")
 
     # -- calls --------------------------------------------------------------------------------
     async def call_tool(
@@ -270,6 +291,13 @@ class Gateway:
 
         outcome = CallOutcome(qualified, arguments, decision, False, attributions=ctx.attributions)
         outcome.approval_note = note
+        outcome.context = {
+            "capability": ctx.capability,
+            "control_args": list(ctx.control_args),
+            "data_args": list(ctx.data_args),
+            "server_label": str(ctx.server_label),
+            "destination_allowlist": list(ctx.destination_allowlist),
+        }
         if approved:
             t_mask = time.perf_counter()
             send = arguments
@@ -368,7 +396,8 @@ class Gateway:
                 "output_redactions": list(outcome.output_redactions),
                 "approval": outcome.approval_note or None,
                 "quarantined": outcome.quarantined,
-                "attributions": [a.to_dict() for a in outcome.attributions.values()],
+                "attributions": [a.to_audit() for a in outcome.attributions.values()],
+                "context": outcome.context,
                 "output_span": outcome.output_span.to_dict() if outcome.output_span else None,
                 "overhead_ms": round(outcome.overhead_ms, 3),
             }

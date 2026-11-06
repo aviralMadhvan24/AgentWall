@@ -277,6 +277,29 @@ def _cmd_approvals(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_simulate(args: argparse.Namespace) -> int:
+    from agentwall.audit.log import AuditLog, verify_chain
+    from agentwall.policy.engine import Policy, PolicyError
+    from agentwall.simulator import render_report, simulate
+
+    entries = AuditLog(args.audit).entries
+    if not entries:
+        print(f"no audit entries in {args.audit}", file=sys.stderr)
+        return 1
+    ok, bad = verify_chain(entries)
+    if not ok:
+        print(f"warning: audit log hash chain is broken at entry {bad}", file=sys.stderr)
+    try:
+        policy = Policy.load(args.policy)
+    except PolicyError as exc:
+        print(f"bad policy: {exc}", file=sys.stderr)
+        return 2
+    allowlist = tuple(args.allow) if args.allow is not None else None
+    report = simulate(entries, policy, allowlist)
+    print(render_report(report, policy.name, show_all=args.all))
+    return 0
+
+
 def _cmd_models(args: argparse.Namespace) -> int:
     from agentwall.agent.gemini import GeminiClient
 
@@ -369,6 +392,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--config", default=None)
     p.set_defaults(fn=_cmd_approvals)
+
+    p = sub.add_parser("simulate", help="replay an audit log against a draft policy")
+    p.add_argument("--audit", required=True, help="audit log (JSONL) recorded by the gateway")
+    p.add_argument("--policy", required=True, help="draft policy file or built-in name")
+    p.add_argument("--allow", nargs="*", default=None, help="draft destination allowlist")
+    p.add_argument("--all", action="store_true", help="list unchanged decisions too")
+    p.set_defaults(fn=_cmd_simulate)
 
     p = sub.add_parser("models", help="list Gemini models your API key can call")
     p.set_defaults(fn=_cmd_models)

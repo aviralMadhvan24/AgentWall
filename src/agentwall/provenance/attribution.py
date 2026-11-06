@@ -35,6 +35,10 @@ class ValueAttribution:
     sources: tuple[str, ...]
     from_flagged: bool = False
 
+    def to_audit(self, max_chars: int = 4096) -> dict[str, object]:
+        """Full record for the audit log: enough to re-evaluate the decision later."""
+        return {**self.to_dict(), "value": self.value[:max_chars]}
+
     def to_dict(self) -> dict[str, object]:
         preview = self.value if len(self.value) <= 80 else self.value[:77] + "..."
         return {

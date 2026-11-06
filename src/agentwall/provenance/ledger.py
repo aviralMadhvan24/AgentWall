@@ -52,7 +52,13 @@ class Span:
 class Ledger:
     """Ordered record of labelled spans for one agent session."""
 
-    def __init__(self, detector: DetectorFn | None = None, flag_threshold: float = 0.5) -> None:
+    def __init__(
+        self,
+        detector: DetectorFn | None = None,
+        flag_threshold: float = 0.5,
+        on_add: Callable[[Span], None] | None = None,
+    ) -> None:
+        self._on_add = on_add  # e.g. the audit log, so decisions can be replayed later
         self._spans: list[Span] = []
         self._ids = itertools.count(1)
         self._detector = detector
@@ -104,6 +110,8 @@ class Ledger:
         n = next(self._ids)
         span = Span(f"s{n}", kind, source, text, label, n, flagged, score, parent)
         self._spans.append(span)
+        if self._on_add is not None:
+            self._on_add(span)
         return span
 
     def low_water(self) -> Integrity:

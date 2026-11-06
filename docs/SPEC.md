@@ -205,3 +205,19 @@ In the harness, the opt-in configuration `quarantine` (`--configs quarantine`) q
 `weather` and `files__read_file`; with the obedient agent it measures exposure (saw-injection drops to
 0%). Utility with a real model must be measured with `--agent gemini`, where the model has to use the
 extract tool.
+
+## Policy simulator
+
+`agentwall simulate --audit <log> --policy <draft> [--allow <patterns>] [--all]` replays every recorded
+decision against a draft policy (and optionally a draft destination allowlist) and lists what would
+change, with the draft's explanation for each change.
+
+To make that possible the audit log records, per tool call, the full argument attributions (values up to
+4,096 characters, labels, sources, flags) and the other policy inputs (capability, argument roles,
+server label, allowlist), and a `span` event for everything that enters the context: labels, entities
+and detector flags, not the text, except the normalised text of user messages, which decides what stays
+trusted and what is never masked. `audit_spans: false` turns the span events off (the simulator then
+cannot replay). Session ids carry a per-gateway random prefix so several gateways can share one log.
+
+Fidelity: replaying a log against the policy that produced it reproduces every decision; the test suite
+checks this over the whole quick harness in four configurations.
