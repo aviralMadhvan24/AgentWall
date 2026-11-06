@@ -639,4 +639,11 @@ def build_corpus(suite: str = "full") -> list[Scenario]:
             by_cat.setdefault(s.category, []).append(s)
         picked = [s for group in by_cat.values() for s in group[::4]]
         return picked + benigns[::2]
+    if suite == "adaptive":
+        # Rule-rewritten variants of the quick suite's plain page and file attacks, plus the benign
+        # half of the quick suite so utility and FPR are still measured.
+        from agentwall.harness.adaptive import adaptive_corpus, seed_scenarios
+
+        quick = build_corpus("quick")
+        return adaptive_corpus(seed_scenarios(quick)) + [s for s in quick if s.kind == "benign"]
     raise ValueError(f"unknown suite {suite!r}")

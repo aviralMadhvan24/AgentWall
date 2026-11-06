@@ -151,3 +151,22 @@ reported per task, not hidden.
 In stdio proxy mode the gateway sees tool calls but not the user's prompt. Values first seen before any
 untrusted span are treated as trusted; values the model produces after taint inherit the low-water mark.
 Hosts that can forward user messages should use the in-process API (`Gateway.add_user_message`).
+
+## Adaptive attacks
+
+A fixed corpus measures yesterday's attacks. `agentwall adaptive` gives the attacker a budget of N
+attempts per seed attack (the quick suite's plain page and file attacks): the original, then rewrites,
+until one succeeds. Every rewrite must keep the attacker's values that the original carried (address,
+URL, path), otherwise it is a different attack.
+
+- `--mutator rules` (default): deterministic rewrites (softened wording, hiding the instruction in an
+  HTML comment, JSON or a footnote, third-person framing, line splits), with attacker values shielded
+  from word swaps. Free and repeatable.
+- `--mutator gemini`: a model rewrites the instruction, with each failed attempt's outcome as
+  feedback.
+- `--agent gemini` makes the victim a real model instead of the obedient agent.
+
+`agentwall bench --suite adaptive` runs fixed rule rewrites (category `adaptive_rewrite`, split `test`)
+plus the quick suite's benign scenarios through every ablation, so it is part of the regular harness.
+Expected result: keyword detection degrades sharply under rewriting; provenance does not depend on
+wording.

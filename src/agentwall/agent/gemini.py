@@ -20,7 +20,7 @@ from agentwall.agent.model import (
     TransientError,
 )
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.5-flash"  # 2.5-flash is closed to new users; verified with a free key
 _RETRY_DELAY = re.compile(r"retryDelay['\"]?\s*:\s*['\"]?(\d+(?:\.\d+)?)s")
 
 

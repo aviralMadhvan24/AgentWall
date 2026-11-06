@@ -207,6 +207,27 @@ def _cmd_dojo(args: argparse.Namespace) -> int:
     return code
 
 
+def _cmd_adaptive(args: argparse.Namespace) -> int:
+    from agentwall.harness.adaptive import LLMMutator, RuleMutator
+    from agentwall.harness.adaptive_run import run_adaptive_cli
+    from agentwall.harness.runner import ModelAgentSpec
+
+    needs_model = args.mutator == "gemini" or args.agent == "gemini"
+    client = _model_client(args) if needs_model else None
+    mutator: Any = RuleMutator()
+    agent = None
+    if client is not None:
+        if args.mutator == "gemini":
+            mutator = LLMMutator(client, args.model)
+        if args.agent == "gemini":
+            agent = ModelAgentSpec(client, args.model, max_turns=args.max_turns)
+    configs = args.configs or ["detector_only", "attribution", "full"]
+    code = run_adaptive_cli(mutator, configs, args.budget_per_seed, Path(args.out), agent)
+    if client is not None:
+        print(f"model cache: {client.hits} hits, {client.misses} new calls, {len(client)} entries")
+    return code
+
+
 def _cmd_models(args: argparse.Namespace) -> int:
     from agentwall.agent.gemini import GeminiClient
 
@@ -259,7 +280,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=_cmd_demo_setup)
 
     p = sub.add_parser("bench", help="run the evaluation harness")
-    p.add_argument("--suite", default="quick", choices=["quick", "full"])
+    p.add_argument("--suite", default="quick", choices=["quick", "full", "adaptive"])
     p.add_argument(
         "--out", default=None, help="results directory (default: results, or results/gemini)"
     )
@@ -279,6 +300,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", default="results/agentdojo")
     _add_model_args(p, "results/agentdojo/cache.jsonl", turns=False)
     p.set_defaults(fn=_cmd_dojo)
+
+    p = sub.add_parser("adaptive", help="rewrite attacks until they get through")
+    p.add_argument("--mutator", default="rules", choices=["rules", "gemini"])
+    p.add_argument("--agent", default="obedient", choices=["obedient", "gemini"])
+    p.add_argument("--configs", nargs="*", help="default: detector_only attribution full")
+    p.add_argument("--budget-per-seed", type=int, default=8, help="attempts per seed attack")
+    p.add_argument("--out", default="results/adaptive")
+    _add_model_args(p, "results/adaptive/cache.jsonl")
+    p.set_defaults(fn=_cmd_adaptive)
 
     p = sub.add_parser("models", help="list Gemini models your API key can call")
     p.set_defaults(fn=_cmd_models)
