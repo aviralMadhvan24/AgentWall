@@ -206,6 +206,10 @@ In the harness, the opt-in configuration `quarantine` (`--configs quarantine`) q
 0%). Utility with a real model must be measured with `--agent gemini`, where the model has to use the
 extract tool.
 
+Limit: quarantine covers tool outputs, not tool descriptions. A poisoned description the operator signed
+is still shown to the agent (1.6% of full-suite attacks under `quarantine`); manifests, the detector and
+policies handle that carrier, and those attacks are still blocked.
+
 ## Policy simulator
 
 `agentwall simulate --audit <log> --policy <draft> [--allow <patterns>] [--all]` replays every recorded

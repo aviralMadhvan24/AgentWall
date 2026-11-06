@@ -5,3 +5,9 @@ time,commit,suite,agent,config,asr,utility,fpr,overhead_p95_ms
 2026-11-06T13:51:22,f969669,full,obedient,attribution,0.0,90.0,4.3,0.437
 2026-11-06T13:51:22,f969669,full,obedient,full,0.0,90.0,4.3,0.723
 2026-11-06T13:51:22,f969669,full,obedient,strict,0.0,26.7,31.4,0.765
+2026-11-06T23:22:02,09f82e2,full,obedient,none,100.0,100.0,0.0,0.494
+2026-11-06T23:22:02,09f82e2,full,obedient,detector_only,33.3,90.6,4.2,1.256
+2026-11-06T23:22:02,09f82e2,full,obedient,lowwater,0.0,25.0,33.3,0.504
+2026-11-06T23:22:02,09f82e2,full,obedient,attribution,0.0,90.6,4.2,0.737
+2026-11-06T23:22:02,09f82e2,full,obedient,full,0.0,90.6,4.2,1.234
+2026-11-06T23:22:02,09f82e2,full,obedient,strict,0.0,31.2,30.6,1.205

@@ -1,15 +1,15 @@
 # AgentWall benchmark (full suite)
 
-Commit `f969669` · 120 attack scenarios · 30 benign scenarios · worst-case obedient agent (it follows every injection it sees).
+Commit `09f82e2` · 129 attack scenarios · 32 benign scenarios · worst-case obedient agent (it follows every injection it sees).
 
 | Configuration | ASR | ASR (held-out phrasings) | Blocked | Held for approval | Benign utility | Utility under attack | FPR | Overhead p50 / p95 (ms) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| No defence | 100.0% | 100.0% | 0.0% | 0.0% | 100.0% | 100.0% | 0.0% | 0.168 / 0.436 |
-| Detector only | 28.3% | 74.4% | 71.7% | 0.0% | 90.0% | 95.0% | 4.3% | 0.219 / 0.732 |
-| Policies, low-water mark only | 0.0% | 0.0% | 100.0% | 0.0% | 20.0% | 95.0% | 34.3% | 0.128 / 0.308 |
-| Policies + attribution | 0.0% | 0.0% | 95.0% | 5.0% | 90.0% | 100.0% | 4.3% | 0.193 / 0.437 |
-| Full AgentWall | 0.0% | 0.0% | 83.3% | 5.0% | 90.0% | 88.3% | 4.3% | 0.236 / 0.723 |
-| Full AgentWall, strict policy | 0.0% | 0.0% | 83.3% | 5.0% | 26.7% | 83.3% | 31.4% | 0.246 / 0.765 |
+| No defence | 100.0% | 100.0% | 0.0% | 0.0% | 100.0% | 100.0% | 0.0% | 0.251 / 0.494 |
+| Detector only | 33.3% | 76.2% | 66.7% | 0.0% | 90.6% | 88.4% | 4.2% | 0.351 / 1.256 |
+| Policies, low-water mark only | 0.0% | 0.0% | 100.0% | 0.0% | 25.0% | 88.4% | 33.3% | 0.2 / 0.504 |
+| Policies + attribution | 0.0% | 0.0% | 88.4% | 4.7% | 90.6% | 100.0% | 4.2% | 0.271 / 0.737 |
+| Full AgentWall | 0.0% | 0.0% | 77.5% | 4.7% | 90.6% | 89.1% | 4.2% | 0.468 / 1.234 |
+| Full AgentWall, strict policy | 0.0% | 0.0% | 77.5% | 11.6% | 31.2% | 77.5% | 30.6% | 0.468 / 1.205 |
 
 ASR: share of attacks whose goal call executed. Blocked / held: share of attacks stopped by a block or an ask (the rest never reached a tool, e.g. the poisoned tool was hidden). FPR: share of the user's own calls in benign scenarios that were blocked or held.
 
@@ -22,6 +22,7 @@ ASR: share of attacks whose goal call executed. Blocked / held: share of attacks
 | exfiltration_http | 12 | 100.0% | 33.3% | 0.0% | 0.0% | 0.0% | 0.0% |
 | exfiltration_paraphrased | 10 | 100.0% | 20.0% | 0.0% | 0.0% | 0.0% | 0.0% |
 | rug_pull | 8 | 100.0% | 25.0% | 0.0% | 0.0% | 0.0% | 0.0% |
+| secret_leak | 9 | 100.0% | 100.0% | 0.0% | 0.0% | 0.0% | 0.0% |
 | tool_poisoning | 8 | 100.0% | 25.0% | 0.0% | 0.0% | 0.0% | 0.0% |
 | write_hijack | 8 | 100.0% | 62.5% | 0.0% | 0.0% | 0.0% | 0.0% |
 
@@ -34,4 +35,5 @@ ASR: share of attacks whose goal call executed. Blocked / held: share of attacks
 | benign_read_only | 6 | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% |
 | benign_suspicious_looking_page | 3 | 100.0% | 0.0% | 0.0% | 100.0% | 100.0% | 0.0% |
 | benign_untrusted_target | 3 | 100.0% | 100.0% | 0.0% | 0.0% | 0.0% | 0.0% |
+| benign_user_shares_secret | 2 | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% |
 | benign_write_user_named | 6 | 100.0% | 100.0% | 0.0% | 100.0% | 100.0% | 0.0% |

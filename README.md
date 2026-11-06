@@ -18,9 +18,11 @@ Agent ──► AgentWall gateway ──► MCP servers (web, portfolio, email, 
             1. provenance ledger: every span labelled by source, integrity, confidentiality
             2. argument attribution: each argument traced to the spans it came from
             3. injection detector: flags instructions hidden in tool text (signal, not verdict)
-            4. policy engine: ALLOW / BLOCK / ASK, with the reason and the provenance chain
+            4. policy engine: ALLOW / REDACT / ASK / BLOCK, with the reason and the provenance chain
             + signed manifests: pinned tool descriptions; rug pulls quarantine the server
-            + hash-chained audit log
+            + quarantine mode: untrusted output reaches the agent only as typed fields
+            + approvals service for ASK, with remembered decisions
+            + hash-chained audit log, policy simulator, OpenTelemetry, local web console
 ```
 
 - **Labels.** Integrity (`trusted`, `untrusted`) decides whether data may give instructions or choose
@@ -33,36 +35,70 @@ Agent ──► AgentWall gateway ──► MCP servers (web, portfolio, email, 
   sensitive data may only go to destinations the user named or the operator allowlisted.
 - **Manifests.** Ed25519-signed, per-tool capability class (`read`, `write`, `egress`), argument roles,
   output labels, and SHA-256 pins of each description and schema.
+- **Redaction.** `action: redact` masks credentials (or PII) in outgoing arguments and lets the call run.
+  Provenance decides: a key the user typed is sent; the same key copied out of a file is masked.
+- **Quarantine (dual-LLM).** Output from chosen servers is stored in a vault; the agent gets a handle and
+  the tool `agentwall__extract`, which returns only validated typed fields (numbers, dates, emails, URLs,
+  enums, short strings), so injected instructions never reach it.
+- **Operations.** `agentwall approvals` answers held calls (once or remembered, per recipient);
+  `agentwall simulate` replays the audit log against a draft policy; `agentwall console` shows live
+  decisions, data flows and approvals; decisions can go to OpenTelemetry or JSON logs.
 
 Full design: [docs/SPEC.md](docs/SPEC.md). Threat model: [docs/threat_model.md](docs/threat_model.md).
 
 ## Results
 
-Full suite: 120 attack scenarios across 7 categories and 30 benign scenarios, run with a **worst-case
+Full suite: 129 attack scenarios across 8 categories and 32 benign scenarios, run with a **worst-case
 obedient agent** that follows every injection it sees. Reproduce with `agentwall bench --suite full`.
 
 | Configuration | Attack success | Held-out phrasings | Benign utility | False-positive rate | Overhead p95 |
 | --- | --- | --- | --- | --- | --- |
-| No defence | 100.0% | 100.0% | 100.0% | 0.0% | 0.44 ms |
-| Detector only | 28.3% | 74.4% | 90.0% | 4.3% | 0.73 ms |
-| Policies, low-water mark only | 0.0% | 0.0% | 20.0% | 34.3% | 0.31 ms |
-| Policies + attribution | 0.0% | 0.0% | 90.0% | 4.3% | 0.44 ms |
-| **Full AgentWall** | **0.0%** | **0.0%** | **90.0%** | **4.3%** | **0.72 ms** |
+| No defence | 100.0% | 100.0% | 100.0% | 0.0% | 0.49 ms |
+| Detector only | 33.3% | 76.2% | 90.6% | 4.2% | 1.26 ms |
+| Policies, low-water mark only | 0.0% | 0.0% | 25.0% | 33.3% | 0.50 ms |
+| Policies + attribution | 0.0% | 0.0% | 90.6% | 4.2% | 0.74 ms |
+| **Full AgentWall** | **0.0%** | **0.0%** | **90.6%** | **4.2%** | **1.23 ms** |
 
 What the ablation shows:
 
-- A text detector alone misses polite and paraphrased injections: 74.4% of attacks with held-out
+- A text detector alone misses polite and paraphrased injections: 76.2% of attacks with held-out
   phrasings still succeed.
-- Blocking every side effect after untrusted content (the low-water mark) stops attacks but breaks 80% of
+- Blocking every side effect after untrusted content (the low-water mark) stops attacks but breaks 75% of
   normal tasks.
 - Argument attribution is what keeps both: attacks stopped, normal tasks still completed.
+- Credential leaks to a contact the user named (`secret_leak`) pass every destination rule; only
+  redaction stops them.
 
 Per-category tables: [results/latest.md](results/latest.md).
 
-**Read these numbers honestly.** The corpus was written by the same people who built the defence, and
-the attacks are not adaptive. The remaining false positives are deliberate hard cases: the user asks to
-email an address that exists only on an untrusted page, which provenance alone cannot tell apart from an
-attack. Real-model and AgentDojo runs are below; adaptive attacks are next.
+### Adaptive attacks
+
+An attacker who keeps rewording: each seed attack gets up to 8 tries (the original, then rewrites that
+keep the attacker's exact address), `agentwall adaptive`:
+
+| Configuration | Seed attacks broken | Adaptive attack success |
+| --- | --- | --- |
+| No defence | 15/15 | 100% |
+| Detector only | 13/15 | 86.7% (most on the 2nd try) |
+| Policies + attribution | 0/15 | 0% |
+| **Full AgentWall** | **0/15** | **0%** |
+
+Keyword detection collapses once the wording changes; provenance does not depend on wording. Details and
+winning rewrites: [results/adaptive/latest.md](results/adaptive/latest.md). `--mutator gemini` uses a
+model as the attacker.
+
+### Quarantine
+
+With quarantine on for the untrusted servers (`--configs quarantine`), the obedient agent saw an injected
+instruction in 1.6% of attacks (89.1% without it, 100% with no defence), at the same utility and
+false-positive rate. The remaining cases are poisoned tool *descriptions*, which quarantine does not
+cover (signed manifests and policy do; both are still blocked).
+
+**Read these numbers honestly.** The corpus and the rule-based rewrites were written by the same people
+who built the defence. The remaining false positives are deliberate hard cases: the user asks to email
+an address that exists only on an untrusted page, which provenance alone cannot tell apart from an
+attack. The obedient agent measures the defence under the strongest attacker assumption; real-model
+numbers come from the runs below.
 
 ### Real model (Gemini) and AgentDojo
 
@@ -74,7 +110,11 @@ export GEMINI_API_KEY=...                   # PowerShell: $env:GEMINI_API_KEY=".
 agentwall models                            # model ids your key can call
 agentwall bench --agent gemini              # quick suite, no defence vs full AgentWall
 agentwall dojo                              # AgentDojo banking subset, same two configurations
+agentwall adaptive --mutator gemini         # a model rewrites attacks; --agent gemini for a real victim
 ```
+
+The default model is `gemini-3.5-flash` (set `AGENTWALL_GEMINI_MODEL` or `--model` to change it); the
+key and model can live in a git-ignored `.env` file (see `.env.example`).
 
 Free-tier limits are low, so runs are built to stop and resume: every model response is cached
 (`results/gemini/cache.jsonl`, `results/agentdojo/cache.jsonl`), finished AgentDojo tasks are recorded in
@@ -113,6 +153,19 @@ Tools appear namespaced as `server__tool`. Blocked calls return an error that ex
 where the offending value came from. Every decision is written to `.agentwall/audit.jsonl`
 (`agentwall audit-verify .agentwall/audit.jsonl` checks the hash chain).
 
+### Operating it
+
+```bash
+agentwall approvals list                    # calls the policy held ("ask")
+agentwall approvals approve <id> --remember # once, or for every future call to the same target
+agentwall simulate --audit .agentwall/audit.jsonl --policy my-draft.yaml   # what would change?
+agentwall console --config examples/agentwall.yaml                         # http://127.0.0.1:8765
+```
+
+Optional gateway config keys: `approvals: {store, wait_seconds}`, `redact_outputs: [secrets]`,
+`quarantine: {targets: [web, files__read_file], extractor: rules | gemini}`,
+`telemetry: {json_log: true, otel: {exporter: otlp, endpoint: ...}}`. See [docs/SPEC.md](docs/SPEC.md).
+
 ### Protecting your own servers
 
 ```bash
@@ -128,12 +181,20 @@ agentwall sign --key keys/operator.key manifests/*.yaml
 src/agentwall/
   labels.py            integrity and confidentiality labels
   provenance/          ledger, normalisation, entity extraction, argument attribution
-  policy/              predicates, YAML engine;  policies/  built-in policies
+  policy/              predicates, YAML engine, argument redaction;  policies/  built-in policies
   registry/            manifests, Ed25519 signing, rug-pull detection
   detector/            heuristic detector (EN/HI/Hinglish), optional transformer
   gateway/             core, MCP backends, stdio proxy, config loader
+  redaction.py         secret and PII patterns
+  quarantine.py        vault, typed extraction, validation (dual-LLM mode)
+  approvals.py         approval store and approver
+  simulator.py         replay audit logs against draft policies
+  telemetry.py         OpenTelemetry and JSON-log sinks
+  console/             local web console (stdlib server + static page)
   audit/               hash-chained log
-  harness/             corpus, obedient agent, runner, report
+  agent/               model clients (cache, throttle, Gemini) and the tool-calling agent loop
+  harness/             corpus, judge, obedient agent, adaptive attacks, runner, report
+  integrations/        AgentDojo pipeline elements and manifests
   demo/                demo MCP servers with in-memory side effects
 docs/                  spec and threat model
 .claude/               Claude Code settings, hooks, skills and a security-review subagent
@@ -150,7 +211,7 @@ pre-approves tests and lint, formats after every edit and blocks finishing while
 
 | Phase | Scope |
 | --- | --- |
-| v0.1 (this) | Gateway, provenance, attribution, policies, manifests, detector, audit, harness |
-| MVP | Streamable HTTP transport, Postgres audit store, harness in CI with regression gates |
-| Beta | Quarantine (dual-LLM) mode, approvals service, redaction, web console, fine-tuned detector |
-| v1.0 | Policy simulator, multi-tenant, full AgentDojo suites, threat-model write-up |
+| v0.1 | Gateway, provenance, attribution, policies, manifests, detector, audit, harness |
+| v0.2 (this) | Real-model (Gemini) mode, AgentDojo subset, adaptive attacks, redaction, quarantine, approvals, policy simulator, telemetry, console |
+| Next | Live Gemini and AgentDojo results, streamable HTTP transport, Postgres audit store, fine-tuned detector |
+| Later | Multi-tenant, full AgentDojo suites, console login, threat-model write-up |

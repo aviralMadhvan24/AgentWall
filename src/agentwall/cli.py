@@ -127,6 +127,9 @@ async def _demo_setup(directory: Path) -> None:
         "attribution": True,
         "destination_allowlist": [],
         "audit_log": ".agentwall/audit.jsonl",
+        "approvals": {"store": ".agentwall/approvals.json", "wait_seconds": 0},
+        "redact_outputs": [],
+        "telemetry": {"json_log": False},
     }
     (directory / "agentwall.yaml").write_text(
         yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
