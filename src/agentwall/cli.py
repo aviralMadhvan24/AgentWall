@@ -291,6 +291,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    try:  # GEMINI_API_KEY etc. from ./.env; variables already set in the shell win
+        from dotenv import find_dotenv, load_dotenv
+
+        load_dotenv(find_dotenv(usecwd=True))
+    except ImportError:
+        pass
     # Reports contain characters a Windows console code page may lack; never crash printing them.
     reconfigure = getattr(sys.stdout, "reconfigure", None)
     if reconfigure is not None:
