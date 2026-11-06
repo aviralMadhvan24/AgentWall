@@ -158,6 +158,11 @@ def test_errors_map_to_retry_or_stop():
     plain = ValueError("x")
     assert map_error(plain) is plain
 
+    class ReadTimeout(Exception):  # stands in for httpx.ReadTimeout
+        pass
+
+    assert isinstance(map_error(ReadTimeout("slow")), TransientError)
+
 
 @pytest.mark.live
 @pytest.mark.skipif(not os.environ.get("GEMINI_API_KEY"), reason="needs GEMINI_API_KEY")

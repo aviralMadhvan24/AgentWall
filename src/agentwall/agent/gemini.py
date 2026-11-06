@@ -133,6 +133,11 @@ def map_error(exc: Exception) -> Exception:
     from google.genai import errors
 
     if not isinstance(exc, errors.APIError):
+        # A request that times out or loses its connection is worth retrying (httpx raises
+        # TimeoutException / ConnectError / RemoteProtocolError subclasses).
+        name = type(exc).__name__
+        if any(k in name for k in ("Timeout", "ConnectError", "RemoteProtocolError", "ReadError")):
+            return TransientError(f"{name}: {exc}")
         return exc
     text = str(exc)
     if exc.code == 429:
@@ -148,8 +153,9 @@ def map_error(exc: Exception) -> Exception:
 
 
 class GeminiClient:
-    def __init__(self, api_key: str | None = None) -> None:
+    def __init__(self, api_key: str | None = None, timeout_s: float = 120.0) -> None:
         from google import genai
+        from google.genai import types
 
         key = api_key or api_key_from_env()
         if not key:
@@ -157,7 +163,10 @@ class GeminiClient:
                 "set GEMINI_API_KEY (free key: https://aistudio.google.com/apikey), "
                 "or pass --replay-only to use cached responses"
             )
-        self._client = genai.Client(api_key=key)
+        # Without a timeout one stuck request can hang a whole benchmark run.
+        self._client = genai.Client(
+            api_key=key, http_options=types.HttpOptions(timeout=int(timeout_s * 1000))
+        )
 
     def generate(self, request: ModelRequest) -> ModelResponse:
         try:
