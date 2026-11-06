@@ -16,7 +16,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,agentdojo]"
       - run: ruff check src tests
       - run: ruff format --check src tests
       - run: mypy src
@@ -32,6 +32,17 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
       - run: agentwall bench --suite full --out results/
+      - name: Replay real-model runs from the committed caches (no API key needed)
+        run: |
+          pip install -e ".[agentdojo]"
+          if [ -f results/gemini/latest.json ]; then
+            eval "$(python -c "import json; d = json.load(open('results/gemini/latest.json')); print('MODEL=' + d['agent'].split(':', 1)[1] + ' REPEATS=' + str(d['repeats']) + ' CONFIGS=\"' + ' '.join(d['summary']) + '\"')")"
+            agentwall bench --agent gemini --replay-only --model "$MODEL" --repeats "$REPEATS" --configs $CONFIGS --out /tmp/gemini
+          fi
+          if [ -f results/agentdojo/latest.json ]; then
+            eval "$(python -c "import json; d = json.load(open('results/agentdojo/latest.json')); print('MODEL=' + d['model'] + ' CONFIGS=' + ','.join(d['summary']))")"
+            agentwall dojo --replay-only --model "$MODEL" --configs "$CONFIGS" --out /tmp/agentdojo
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: bench-results

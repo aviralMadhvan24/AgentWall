@@ -62,13 +62,33 @@ Per-category tables: [results/latest.md](results/latest.md).
 **Read these numbers honestly.** The corpus was written by the same people who built the defence, and
 the attacks are not adaptive. The remaining false positives are deliberate hard cases: the user asks to
 email an address that exists only on an untrusted page, which provenance alone cannot tell apart from an
-attack. Next steps: an AgentDojo subset, a real-model agent (Gemini), and adaptive attacks.
+attack. Real-model and AgentDojo runs are below; adaptive attacks are next.
+
+### Real model (Gemini) and AgentDojo
+
+Both run on Gemini's free API tier. Get a key at https://aistudio.google.com/apikey, then:
+
+```bash
+pip install -e ".[dev,agentdojo]"
+export GEMINI_API_KEY=...                   # PowerShell: $env:GEMINI_API_KEY="..."
+agentwall models                            # model ids your key can call
+agentwall bench --agent gemini              # quick suite, no defence vs full AgentWall
+agentwall dojo                              # AgentDojo banking subset, same two configurations
+```
+
+Free-tier limits are low, so runs are built to stop and resume: every model response is cached
+(`results/gemini/cache.jsonl`, `results/agentdojo/cache.jsonl`), finished AgentDojo tasks are recorded in
+`results/agentdojo/runs.jsonl`, and when the daily quota runs out the command exits with code 3. Run the
+same command the next day to continue. `--rpm` sets the request rate, `--budget N` caps API calls per run,
+and `--replay-only` rebuilds the reports from the cache with no key. Reports land in
+[results/gemini/latest.md](results/gemini/latest.md) and
+[results/agentdojo/latest.md](results/agentdojo/latest.md) once a run completes.
 
 ## Quickstart
 
 ```bash
 pip install -e ".[dev]"
-pytest -q                                   # 55 tests, including an end-to-end stdio proxy test
+pytest -q                                   # unit, harness and end-to-end stdio proxy tests
 agentwall bench --suite quick               # ~10 s ablation run
 
 agentwall demo-setup --dir examples         # operator key, signed demo manifests, config
@@ -133,4 +153,4 @@ pre-approves tests and lint, formats after every edit and blocks finishing while
 | v0.1 (this) | Gateway, provenance, attribution, policies, manifests, detector, audit, harness |
 | MVP | Streamable HTTP transport, Postgres audit store, harness in CI with regression gates |
 | Beta | Quarantine (dual-LLM) mode, approvals service, redaction, web console, fine-tuned detector |
-| v1.0 | Policy simulator, multi-tenant, AgentDojo results, threat-model write-up |
+| v1.0 | Policy simulator, multi-tenant, full AgentDojo suites, threat-model write-up |

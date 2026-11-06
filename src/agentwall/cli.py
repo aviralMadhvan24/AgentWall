@@ -151,7 +151,7 @@ def _model_client(args: argparse.Namespace) -> Any:
     return CachedClient(inner, args.cache, replay_only=args.replay_only)
 
 
-def _add_model_args(p: argparse.ArgumentParser, default_cache: str) -> None:
+def _add_model_args(p: argparse.ArgumentParser, default_cache: str, turns: bool = True) -> None:
     from agentwall.agent.gemini import DEFAULT_MODEL
 
     p.add_argument("--model", default=os.environ.get("AGENTWALL_GEMINI_MODEL", DEFAULT_MODEL))
@@ -159,7 +159,8 @@ def _add_model_args(p: argparse.ArgumentParser, default_cache: str) -> None:
     p.add_argument("--replay-only", action="store_true", help="never call the API; use the cache")
     p.add_argument("--rpm", type=float, default=8.0, help="max model requests per minute")
     p.add_argument("--budget", type=int, default=0, help="max API calls this run (0: no limit)")
-    p.add_argument("--max-turns", type=int, default=10)
+    if turns:
+        p.add_argument("--max-turns", type=int, default=10)
 
 
 def _cmd_bench(args: argparse.Namespace) -> int:
@@ -175,6 +176,32 @@ def _cmd_bench(args: argparse.Namespace) -> int:
         configs=args.configs or ["none", "full"],
         agent=spec,
         repeats=args.repeats,
+    )
+    print(f"model cache: {client.hits} hits, {client.misses} new calls, {len(client)} entries")
+    return code
+
+
+def _cmd_dojo(args: argparse.Namespace) -> int:
+    try:
+        from agentwall.integrations.agentdojo.runner import run_dojo_cli
+    except ImportError:
+        print('AgentDojo is not installed: pip install -e ".[agentdojo]"', file=sys.stderr)
+        return 2
+    client = _model_client(args)
+
+    def split(v: str | None) -> tuple[str, ...] | None:
+        return tuple(x.strip() for x in v.split(",") if x.strip()) if v else None
+
+    code = run_dojo_cli(
+        client,
+        args.model,
+        args.suite,
+        args.version,
+        split(args.configs) or ("none", "full"),
+        split(args.injection_tasks),
+        split(args.user_tasks),
+        args.attack,
+        Path(args.out),
     )
     print(f"model cache: {client.hits} hits, {client.misses} new calls, {len(client)} entries")
     return code
@@ -242,6 +269,17 @@ def build_parser() -> argparse.ArgumentParser:
     _add_model_args(p, "results/gemini/cache.jsonl")
     p.set_defaults(fn=_cmd_bench)
 
+    p = sub.add_parser("dojo", help="run an AgentDojo suite subset with and without AgentWall")
+    p.add_argument("--suite", default="banking")
+    p.add_argument("--version", default="v1.2.1", help="AgentDojo benchmark version")
+    p.add_argument("--configs", default="none,full", help="comma-separated: none and/or ablations")
+    p.add_argument("--injection-tasks", default=None, help="comma-separated ids (default: preset)")
+    p.add_argument("--user-tasks", default=None, help="comma-separated ids (default: all)")
+    p.add_argument("--attack", default="important_instructions")
+    p.add_argument("--out", default="results/agentdojo")
+    _add_model_args(p, "results/agentdojo/cache.jsonl", turns=False)
+    p.set_defaults(fn=_cmd_dojo)
+
     p = sub.add_parser("models", help="list Gemini models your API key can call")
     p.set_defaults(fn=_cmd_models)
 
@@ -253,6 +291,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    # Reports contain characters a Windows console code page may lack; never crash printing them.
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(errors="replace")
     return int(args.fn(args) or 0)
 
 
