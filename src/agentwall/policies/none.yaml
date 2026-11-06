@@ -1,0 +1,4 @@
+# Ablation baseline: no enforcement.
+version: 1
+default: allow
+rules: []

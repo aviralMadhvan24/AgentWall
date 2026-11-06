@@ -62,5 +62,12 @@ def extract_entities(text: str) -> frozenset[str]:
 
 
 def destination_entities(entities: frozenset[str]) -> frozenset[str]:
-    """Entities that name a place data can be sent to."""
-    return frozenset(e for e in entities if e.startswith(("email:", "url:", "domain:", "acct:")))
+    """Entities that name a place data can be sent to.
+
+    Domains derived from an email or URL are implied by it, so they are only returned when no more
+    specific destination (email, URL, account) is present.
+    """
+    specific = frozenset(e for e in entities if e.startswith(("email:", "url:", "acct:")))
+    if specific:
+        return specific
+    return frozenset(e for e in entities if e.startswith("domain:"))

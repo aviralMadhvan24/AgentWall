@@ -1,0 +1,9 @@
+# Ablation baseline: block side effects once the detector has flagged anything in the session.
+version: 1
+default: allow
+rules:
+  - id: flagged-session-blocks-side-effects
+    when: {tool_class: [write, egress]}
+    if: [session_has_flagged_span]
+    action: block
+    reason: The detector flagged content in this session

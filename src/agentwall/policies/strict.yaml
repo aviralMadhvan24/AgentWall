@@ -1,0 +1,25 @@
+# Strict mode: once anything untrusted is in context, side effects need a human.
+version: 1
+default: allow
+rules:
+  - id: untrusted-cannot-steer-egress
+    when: {tool_class: [egress]}
+    if: [control_args_untrusted]
+    action: block
+    reason: Destination or action was chosen by untrusted content
+  - id: untrusted-cannot-steer-writes
+    when: {tool_class: [write]}
+    if: [control_args_untrusted]
+    action: block
+    reason: Write target was chosen by untrusted content
+  - id: sensitive-stays-inside
+    when: {tool_class: [egress]}
+    if:
+      - sensitive_data_to_unapproved_destination: {level: sensitive}
+    action: block
+    reason: Sensitive data headed to a destination the user did not name
+  - id: ask-after-taint
+    when: {tool_class: [write, egress]}
+    if: [session_tainted]
+    action: ask
+    reason: Untrusted content is in context; confirm this side effect
