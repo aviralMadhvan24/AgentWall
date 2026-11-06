@@ -135,7 +135,9 @@ DEMO_TOOL_POLICY: dict[str, dict[str, Any]] = {
     "files": {
         "label": ("trusted", "internal"),
         "tools": {
-            "read_file": ("read", ("path",), ()),
+            # File contents may have been written by anyone (shared drives, downloads), so the
+            # output of read_file is untrusted even though the server itself is trusted.
+            "read_file": ("read", ("path",), (), ("untrusted", "internal")),
             "write_file": ("write", ("path",), ("content",)),
         },
     },

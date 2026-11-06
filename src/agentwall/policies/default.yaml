@@ -23,6 +23,12 @@ rules:
     action: block
     reason: Sensitive data headed to a destination the user did not name
 
+  - id: untrusted-links-in-outbound-data
+    when: {tool_class: [egress, write]}
+    if: [data_args_carry_untrusted_destinations]
+    action: ask
+    reason: Outgoing content contains a link or address that only untrusted content supplied
+
   - id: flagged-content-cannot-steer
     when: {tool_class: [write, egress]}
     if: [args_from_flagged_span]

@@ -70,9 +70,12 @@ class Registry:
             [Manifest.load(p) for p in paths], public_keys, require_signatures=require_signatures
         )
 
-    def label_for(self, server: str) -> Label:
+    def label_for(self, server: str, tool: str | None = None) -> Label:
         manifest = self.manifests.get(server)
-        return manifest.output_label if manifest else UNTRUSTED_PUBLIC
+        if manifest is None:
+            return UNTRUSTED_PUBLIC
+        pin = manifest.tools.get(tool) if tool else None
+        return pin.output_label if pin and pin.output_label else manifest.output_label
 
     def pin_for(self, server: str, tool: str) -> ToolPin | None:
         manifest = self.manifests.get(server)
@@ -138,6 +141,7 @@ def draft_manifest(
     label: Label,
     capabilities: dict[str, str] | None = None,
     roles: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] | None = None,
+    output_labels: dict[str, Label] | None = None,
 ) -> Manifest:
     """Pin the tools a server advertises right now. Review before signing."""
     capabilities = capabilities or {}
@@ -146,6 +150,10 @@ def draft_manifest(
     for tool in tools:
         control, data = roles.get(tool.name, ((), ()))
         pins[tool.name] = ToolPin.from_tool(
-            tool, capabilities.get(tool.name, "read"), control, data
+            tool,
+            capabilities.get(tool.name, "read"),
+            control,
+            data,
+            (output_labels or {}).get(tool.name),
         )
     return Manifest(server=server, output_label=label, tools=pins)

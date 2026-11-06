@@ -32,6 +32,7 @@ class ToolPin:
     schema_sha256: str
     control_args: tuple[str, ...] = ()
     data_args: tuple[str, ...] = ()
+    output_label: Label | None = None  # overrides the server's label for this tool's output
 
     def __post_init__(self) -> None:
         if self.capability not in CAPABILITIES:
@@ -44,6 +45,7 @@ class ToolPin:
         capability: str,
         control_args: tuple[str, ...] = (),
         data_args: tuple[str, ...] = (),
+        output_label: Label | None = None,
     ) -> ToolPin:
         return cls(
             tool.name,
@@ -52,6 +54,7 @@ class ToolPin:
             sha256_schema(tool.input_schema),
             tuple(control_args),
             tuple(data_args),
+            output_label,
         )
 
     def matches(self, tool: ToolInfo) -> bool:
@@ -60,13 +63,17 @@ class ToolPin:
         ) and self.schema_sha256 == sha256_schema(tool.input_schema)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data: dict[str, Any] = {
             "capability": self.capability,
             "description_sha256": self.description_sha256,
             "schema_sha256": self.schema_sha256,
             "control_args": list(self.control_args),
             "data_args": list(self.data_args),
         }
+        if self.output_label is not None:
+            data["output_integrity"] = str(self.output_label.integrity)
+            data["output_confidentiality"] = str(self.output_label.confidentiality)
+        return data
 
 
 @dataclass
@@ -109,6 +116,9 @@ class Manifest:
                 spec["schema_sha256"],
                 tuple(spec.get("control_args", ())),
                 tuple(spec.get("data_args", ())),
+                Label.parse(spec["output_integrity"], spec["output_confidentiality"])
+                if "output_integrity" in spec
+                else None,
             )
             for name, spec in (data.get("tools") or {}).items()
         }

@@ -17,7 +17,8 @@ def demo_manifest(server: str, tools: Iterable[ToolInfo]) -> Manifest:
     label = Label.parse(*spec["label"])
     caps = {name: v[0] for name, v in spec["tools"].items()}
     roles = {name: (v[1], v[2]) for name, v in spec["tools"].items()}
-    return draft_manifest(server, list(tools), label, caps, roles)
+    outputs = {name: Label.parse(*v[3]) for name, v in spec["tools"].items() if len(v) > 3}
+    return draft_manifest(server, list(tools), label, caps, roles, outputs)
 
 
 def signed_demo_manifest(server: str, tools: Iterable[ToolInfo], private_key_hex: str) -> Manifest:
@@ -25,5 +26,6 @@ def signed_demo_manifest(server: str, tools: Iterable[ToolInfo], private_key_hex
 
 
 def pin(tool: ToolInfo, server: str) -> ToolPin:
-    capability, control, data = DEMO_TOOL_POLICY[server]["tools"][tool.name]
-    return ToolPin.from_tool(tool, capability, control, data)
+    capability, control, data, *rest = DEMO_TOOL_POLICY[server]["tools"][tool.name]
+    output = Label.parse(*rest[0]) if rest else None
+    return ToolPin.from_tool(tool, capability, control, data, output)

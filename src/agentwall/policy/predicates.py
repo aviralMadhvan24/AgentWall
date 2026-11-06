@@ -85,7 +85,13 @@ def session_has_flagged_span(ctx: CallContext, params: dict[str, Any]) -> tuple[
 
 @predicate("args_from_flagged_span")
 def args_from_flagged_span(ctx: CallContext, params: dict[str, Any]) -> tuple[bool, str]:
-    hits = [a for a in ctx.attributions.values() if a.from_flagged]
+    """Arguments copied from content the detector flagged.
+
+    ``scope: control`` (default) checks only target-choosing arguments; ``scope: any`` also checks
+    payloads, which is stricter but blocks benign messages that quote a flagged page.
+    """
+    pool = ctx.attributions.values() if params.get("scope") == "any" else ctx.control_attributions()
+    hits = [a for a in pool if a.from_flagged]
     if hits:
         return True, "arguments copied from flagged content: " + ", ".join(a.path for a in hits)
     return False, ""
@@ -96,3 +102,26 @@ def server_untrusted(ctx: CallContext, params: dict[str, Any]) -> tuple[bool, st
     if ctx.server_label.integrity is Integrity.UNTRUSTED:
         return True, f"server {ctx.server} is untrusted"
     return False, ""
+
+
+@predicate("data_args_carry_untrusted_destinations")
+def data_args_carry_untrusted_destinations(
+    ctx: CallContext, params: dict[str, Any]
+) -> tuple[bool, str]:
+    """Outbound payload contains an address or link that only untrusted content supplied.
+
+    Catches content injection into trusted channels: the destination is fine, but the attacker gets a
+    phishing link or a payee address into the message body.
+    """
+    controls = {id(a) for a in ctx.control_attributions()}
+    found: list[str] = []
+    for a in ctx.attributions.values():
+        if id(a) in controls or a.method == "trivial":
+            continue
+        for entity in destination_entities(extract_entities(a.value)):
+            hits = [s for s in ctx.ledger if entity in s.entities]
+            if hits and all(s.label.integrity is Integrity.UNTRUSTED for s in hits):
+                found.append(f"{a.path} carries {entity} from {hits[0].source}")
+            elif not hits and ctx.ledger.tainted():
+                found.append(f"{a.path} carries {entity} first seen after untrusted content")
+    return (True, "; ".join(found)) if found else (False, "")

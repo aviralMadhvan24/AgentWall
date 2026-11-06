@@ -1,0 +1,37 @@
+# AgentWall benchmark (full suite)
+
+Commit `f969669` · 120 attack scenarios · 30 benign scenarios · worst-case obedient agent (it follows every injection it sees).
+
+| Configuration | ASR | ASR (held-out phrasings) | Blocked | Held for approval | Benign utility | Utility under attack | FPR | Overhead p50 / p95 (ms) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| No defence | 100.0% | 100.0% | 0.0% | 0.0% | 100.0% | 100.0% | 0.0% | 0.168 / 0.436 |
+| Detector only | 28.3% | 74.4% | 71.7% | 0.0% | 90.0% | 95.0% | 4.3% | 0.219 / 0.732 |
+| Policies, low-water mark only | 0.0% | 0.0% | 100.0% | 0.0% | 20.0% | 95.0% | 34.3% | 0.128 / 0.308 |
+| Policies + attribution | 0.0% | 0.0% | 95.0% | 5.0% | 90.0% | 100.0% | 4.3% | 0.193 / 0.437 |
+| Full AgentWall | 0.0% | 0.0% | 83.3% | 5.0% | 90.0% | 88.3% | 4.3% | 0.236 / 0.723 |
+| Full AgentWall, strict policy | 0.0% | 0.0% | 83.3% | 5.0% | 26.7% | 83.3% | 31.4% | 0.246 / 0.765 |
+
+ASR: share of attacks whose goal call executed. Blocked / held: share of attacks stopped by a block or an ask (the rest never reached a tool, e.g. the poisoned tool was hidden). FPR: share of the user's own calls in benign scenarios that were blocked or held.
+
+## Attack success by category
+
+| Category | n | No defence | Detector only | Policies, low-water mark only | Policies + attribution | Full AgentWall | Full AgentWall, strict policy |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| content_injection | 6 | 100.0% | 100.0% | 0.0% | 0.0% | 0.0% | 0.0% |
+| exfiltration_email | 68 | 100.0% | 19.1% | 0.0% | 0.0% | 0.0% | 0.0% |
+| exfiltration_http | 12 | 100.0% | 33.3% | 0.0% | 0.0% | 0.0% | 0.0% |
+| exfiltration_paraphrased | 10 | 100.0% | 20.0% | 0.0% | 0.0% | 0.0% | 0.0% |
+| rug_pull | 8 | 100.0% | 25.0% | 0.0% | 0.0% | 0.0% | 0.0% |
+| tool_poisoning | 8 | 100.0% | 25.0% | 0.0% | 0.0% | 0.0% | 0.0% |
+| write_hijack | 8 | 100.0% | 62.5% | 0.0% | 0.0% | 0.0% | 0.0% |
+
+## Benign task completion by category
+
+| Category | n | No defence | Detector only | Policies, low-water mark only | Policies + attribution | Full AgentWall | Full AgentWall, strict policy |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| benign_email_user_named | 8 | 100.0% | 100.0% | 0.0% | 100.0% | 100.0% | 0.0% |
+| benign_post_user_named | 4 | 100.0% | 100.0% | 0.0% | 100.0% | 100.0% | 50.0% |
+| benign_read_only | 6 | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% |
+| benign_suspicious_looking_page | 3 | 100.0% | 0.0% | 0.0% | 100.0% | 100.0% | 0.0% |
+| benign_untrusted_target | 3 | 100.0% | 100.0% | 0.0% | 0.0% | 0.0% | 0.0% |
+| benign_write_user_named | 6 | 100.0% | 100.0% | 0.0% | 100.0% | 100.0% | 0.0% |

@@ -179,8 +179,8 @@ class Gateway:
     def visible_tools(self) -> list[ExposedTool]:
         return [t for t in self.tools.values() if t.visible]
 
-    def label_for(self, server: str) -> Label:
-        return self.config.registry.label_for(server)
+    def label_for(self, server: str, tool: str | None = None) -> Label:
+        return self.config.registry.label_for(server, tool)
 
     def new_session(self) -> Session:
         self._sessions += 1
@@ -229,7 +229,7 @@ class Gateway:
                 result.text,
                 kind="tool_output",
                 source=f"{tool.server}/{tool.info.name}",
-                label=self.label_for(tool.server),
+                label=self.label_for(tool.server, tool.info.name),
             )
             overhead += _ms(t_label)
             outcome.executed, outcome.result = True, result
