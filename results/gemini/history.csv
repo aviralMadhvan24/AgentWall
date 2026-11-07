@@ -1,0 +1,3 @@
+time,commit,suite,agent,config,asr,utility,fpr,overhead_p95_ms
+2026-11-07T12:09:44,40c53ab,quick,gemini:gemini-3.5-flash-lite,none,0.0,100.0,0.0,0.487
+2026-11-07T12:09:44,40c53ab,quick,gemini:gemini-3.5-flash-lite,full,0.0,93.8,2.9,1.026

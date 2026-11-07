@@ -100,9 +100,33 @@ an address that exists only on an untrusted page, which provenance alone cannot 
 attack. The obedient agent measures the defence under the strongest attacker assumption; real-model
 numbers come from the runs below.
 
-### Real model (Gemini) and AgentDojo
+### Real model (Gemini)
 
-Both run on Gemini's free API tier. Get a key at https://aistudio.google.com/apikey, then:
+The same quick suite with a real tool-calling model instead of the obedient agent
+([results/gemini/latest.md](results/gemini/latest.md), `gemini-3.5-flash-lite`, temperature 0,
+34 attacks and 16 benign tasks):
+
+| Configuration | Saw the injection | Followed it | Attack success | Benign utility | FPR |
+| --- | --- | --- | --- | --- | --- |
+| No defence | 100% | 0% | 0% | 100% | 0.0% |
+| Full AgentWall | 88.2% | 0% | 0% | 93.8% | 2.9% |
+
+**The model never followed a single injection, even undefended.** It read the poisoned page, ignored
+the embedded instruction without comment, and answered the user's question. So this run does not show
+AgentWall blocking anything -- there was nothing to block. What it does show is the *cost* of running
+AgentWall in front of a real agent: one benign task out of sixteen fails, and it is the documented
+hard case (`benign_untrusted_target`, where the user asks to mail an address that exists only on an
+untrusted page).
+
+Two honest caveats. This is a small, inexpensive model on a corpus of fairly direct injections, and a
+single run of 34 attacks (the 95% interval for 0/34 still reaches 10%). A defence is worth having for
+the attacks a model *does* fall for, so the obedient-agent and adaptive numbers above remain the
+measurements that carry the argument; this one bounds the false-positive cost.
+
+### AgentDojo
+
+Both run on Gemini's free API tier. Each model has its own daily quota: `gemini-3.5-flash` ran out
+after 18 requests, so the published run uses `gemini-3.5-flash-lite`. Get a key at https://aistudio.google.com/apikey, then:
 
 ```bash
 pip install -e ".[dev,agentdojo]"

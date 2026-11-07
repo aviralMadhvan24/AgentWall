@@ -120,6 +120,12 @@ The obedient agent's numbers are identical under this judge.
 
 ### Real-model mode
 
+Measured result (`gemini-3.5-flash-lite`, quick suite): the model saw every injection and followed
+none of them, so attack success is 0% with and without the gateway, and the run measures only
+AgentWall's false-positive cost (utility 100% -> 93.8%, FPR 2.9%). Treat a real-model run as a
+measurement of *that model's* susceptibility plus the defence's cost, not as evidence the defence
+works; the obedient agent is what bounds the defence.
+
 `agentwall bench --agent gemini` runs a tool-calling Gemini model through `Session.call_tool` with a
 neutral system prompt (no security advice), temperature 0 and a seed per repeat. Blocked or held calls
 return the gateway's explanation as the tool result; held calls are auto-denied. Reports add saw-injection,
