@@ -7,7 +7,7 @@ integrity and maximum confidentiality (the conservative fallback).
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,6 +17,7 @@ from agentwall.labels import Confidentiality, Integrity
 from agentwall.provenance.entities import extract_entities
 from agentwall.provenance.ledger import Ledger, Span
 from agentwall.provenance.normalize import normalize
+from agentwall.redaction import redact
 
 MIN_VALUE_LEN = 3
 FUZZY_MIN_LEN = 40
@@ -35,9 +36,19 @@ class ValueAttribution:
     sources: tuple[str, ...]
     from_flagged: bool = False
 
-    def to_audit(self, max_chars: int = 4096) -> dict[str, object]:
-        """Full record for the audit log: enough to re-evaluate the decision later."""
-        return {**self.to_dict(), "value": self.value[:max_chars]}
+    def to_audit(
+        self, user_typed: Callable[[str], bool] | None = None, max_chars: int = 4096
+    ) -> dict[str, object]:
+        """Record for the audit log: enough to re-evaluate the decision, without the credentials.
+
+        The log is served by the console and shipped to reviewers, so a secret the gateway masked on
+        the wire must not sit in it in cleartext. ``secret_kinds`` lists only the credentials the
+        user did not type, which is exactly what ``args_contain_secrets`` keys on, so the policy
+        simulator can reproduce the decision from the masked value.
+        """
+        masked, found = redact(self.value[:max_chars], ("secrets",))
+        kinds = sorted({f.kind for f in found if not (user_typed and user_typed(f.value))})
+        return {**self.to_dict(), "value": masked, "secret_kinds": kinds}
 
     def to_dict(self) -> dict[str, object]:
         preview = self.value if len(self.value) <= 80 else self.value[:77] + "..."

@@ -19,11 +19,12 @@ rules:
     action: block
     reason: Sensitive data headed to a destination the user did not name
   - id: secrets-stay-inside
-    when: {tool_class: [egress]}
+    # Reads count: a credential in a fetched URL has already left.
+    when: {tool_class: [read, write, egress]}
     if:
-      - args_contain_secrets: {kinds: [secrets], scope: data}
+      - args_contain_secrets: {kinds: [secrets], scope: any}
     action: redact
-    redact: {kinds: [secrets], scope: data}
+    redact: {kinds: [secrets], scope: any}
     reason: Outgoing data contains a credential the user did not provide; it was masked
 
   - id: untrusted-links-in-outbound-data

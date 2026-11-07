@@ -29,7 +29,7 @@ from agentwall.audit.log import AuditLog
 from agentwall.labels import TRUSTED_PUBLIC, Label
 from agentwall.policy.context import CallContext
 from agentwall.policy.engine import Decision, Policy, RuleMatch
-from agentwall.policy.redact_args import redact_arguments
+from agentwall.policy.redact_args import redact_arguments, user_supplied
 from agentwall.provenance.attribution import ValueAttribution, attribute_args
 from agentwall.provenance.ledger import DetectorFn, Ledger, Span
 from agentwall.quarantine import (
@@ -185,6 +185,9 @@ class Session:
 class Gateway:
     def __init__(self, backends: Iterable[Any], config: GatewayConfig | None = None) -> None:
         self.backends = {b.name: b for b in backends}
+        if BUILTIN_SERVER in self.backends:
+            # Tools on this server name are treated as AgentWall's own and trusted without a pin.
+            raise ValueError(f"{BUILTIN_SERVER!r} is reserved for AgentWall's built-in tools")
         self.config = config or GatewayConfig()
         self.tools: dict[str, ExposedTool] = {}
         self._sessions = 0
@@ -350,8 +353,10 @@ class Gateway:
         try:
             fields = parse_fields(arguments.get("fields"))
             if doc is None:
-                known = ", ".join(session.vault) or "none yet"
-                raise ExtractError(f"no quarantined content named {handle!r} (handles: {known})")
+                # Never echo the caller's handle: an error message is gateway-authored text, and
+                # repeating attacker-chosen strings inside it would launder them into the context.
+                known = ", ".join(sorted(session.vault)) or "none yet"
+                raise ExtractError(f"unknown handle; quarantined handles: {known}")
             t_ext = time.perf_counter()
             raw = await anyio.to_thread.run_sync(
                 cfg.quarantine.extractor.extract,
@@ -365,7 +370,10 @@ class Gateway:
             def flagged(text: str) -> bool:
                 return detector is not None and detector(text) >= cfg.flag_threshold
 
-            text = json.dumps(validate(fields, raw, flagged), ensure_ascii=False)
+            text = json.dumps(
+                validate(fields, raw, flagged, have_detector=detector is not None),
+                ensure_ascii=False,
+            )
             result = ToolResult(text)
         except RunStopped:
             raise
@@ -374,11 +382,18 @@ class Gateway:
         except Exception as exc:  # a failing extractor must not take the session down
             result = ToolResult(f"Error: extraction failed ({type(exc).__name__})", is_error=True)
         outcome = CallOutcome(EXTRACT_TOOL, arguments, Decision("allow"), True, result=result)
+        # Extracted values keep the quarantined document's label. An error produced no document, so
+        # it takes the session's current low-water label: gateway text is never trusted by default.
+        label = (
+            doc.label
+            if doc is not None and not result.is_error
+            else Label(session.ledger.low_water(), session.ledger.max_confidentiality())
+        )
         outcome.output_span = session.ledger.add(
             result.text,
             kind="tool_output",
             source=f"quarantine/{doc.source}" if doc else "quarantine",
-            label=doc.label if doc else TRUSTED_PUBLIC,
+            label=label,
         )
         outcome.overhead_ms = _ms(start) - extractor_ms
         self._audit(session, outcome, BUILTIN_SERVER)
@@ -407,7 +422,10 @@ class Gateway:
                 "output_redactions": list(outcome.output_redactions),
                 "approval": outcome.approval_note or None,
                 "quarantined": outcome.quarantined,
-                "attributions": [a.to_audit() for a in outcome.attributions.values()],
+                "attributions": [
+                    a.to_audit(lambda v: user_supplied(v, session.ledger))
+                    for a in outcome.attributions.values()
+                ],
                 "context": outcome.context,
                 "output_span": outcome.output_span.to_dict() if outcome.output_span else None,
                 "overhead_ms": round(outcome.overhead_ms, 3),

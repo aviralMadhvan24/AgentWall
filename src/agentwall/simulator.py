@@ -22,6 +22,7 @@ from agentwall.policy.context import CallContext
 from agentwall.policy.engine import Policy
 from agentwall.provenance.attribution import ValueAttribution
 from agentwall.provenance.ledger import Ledger, Span
+from agentwall.redaction import sample
 
 
 @dataclass
@@ -83,9 +84,13 @@ def _ledger(spans: Iterable[Span]) -> Ledger:
 
 
 def _attribution(record: dict[str, Any]) -> ValueAttribution:
+    # Credentials are masked in the log; put a matching sample back so secret predicates still fire.
+    value = str(record["value"])
+    for kind in record.get("secret_kinds") or []:
+        value = f"{value} {sample(kind)}"
     return ValueAttribution(
         path=record["path"],
-        value=str(record["value"]),
+        value=value,
         integrity=Integrity.parse(record["integrity"]),
         confidentiality=Confidentiality.parse(record["confidentiality"]),
         method=record["method"],
@@ -105,15 +110,24 @@ def simulate(
     """
     report = SimulationReport()
     spans: dict[str, list[Span]] = defaultdict(list)
+    known: dict[str, set[str]] = defaultdict(set)
+    with_spans: set[str] = set()
     for entry in entries:
         event = entry.get("event")
         if event == "span":
             spans[entry["session"]].append(_span(entry["span"]))
+            known[entry["session"]].add(entry["span"]["id"])
+            with_spans.add(entry["session"])
             continue
         if event != "tool_call":
             continue
         context = entry.get("context")
-        if not context:
+        attributions = entry.get("attributions") or []
+        sources = {s for a in attributions for s in a.get("sources") or []}
+        # Without the span events the ledger cannot be rebuilt and every predicate that reads it
+        # would answer differently; reporting "nothing would change" then would be a lie.
+        session = entry["session"]
+        if not context or session not in with_spans or not sources <= known[session]:
             report.skipped += 1
             continue
         # The call's own output (and anything decoded from it) was added after the decision.
@@ -128,7 +142,7 @@ def simulate(
             server=entry.get("server", server),
             tool=tool,
             capability=context["capability"],
-            attributions={a["path"]: _attribution(a) for a in entry.get("attributions") or []},
+            attributions={a["path"]: _attribution(a) for a in attributions},
             ledger=_ledger(before),
             server_label=_label(context["server_label"]),
             control_args=tuple(context.get("control_args") or ()),
@@ -139,7 +153,11 @@ def simulate(
                 else tuple(context.get("destination_allowlist") or ())
             ),
         )
-        decision = policy.evaluate(ctx)
+        try:
+            decision = policy.evaluate(ctx)
+        except KeyError:  # a span the decision referred to is missing from the log
+            report.skipped += 1
+            continue
         report.calls.append(
             SimulatedCall(
                 seq=int(entry.get("seq", 0)),

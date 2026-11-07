@@ -142,6 +142,26 @@ def mask(kind: str) -> str:
     return f"[REDACTED:{kind}]"
 
 
+# One canonical value per secret kind, matching that kind's pattern and nothing real. The policy
+# simulator substitutes these for masked audit values so a replay sees the same predicate results.
+SAMPLES: dict[str, str] = {
+    "private_key": "-----BEGIN PRIVATE KEY-----\nSAMPLE\n-----END PRIVATE KEY-----",
+    "aws_access_key": "AKIA" + "A" * 16,
+    "github_token": "ghp_" + "A" * 36,
+    "google_api_key": "AIza" + "A" * 35,
+    "openai_key": "sk-" + "A" * 20,
+    "anthropic_key": "sk-ant-" + "A" * 20,
+    "slack_token": "xoxb-" + "A" * 12,
+    "stripe_key": "sk_live_" + "A" * 16,
+    "jwt": "eyJ" + "A" * 10 + ".eyJ" + "A" * 10 + "." + "A" * 10,
+    "password_assignment": "password: SAMPLEVALUE",
+}
+
+
+def sample(kind: str) -> str:
+    return SAMPLES.get(kind, "")
+
+
 def redact(
     text: str,
     kinds: Iterable[str] = ("secrets",),

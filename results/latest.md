@@ -1,15 +1,15 @@
 # AgentWall benchmark (full suite)
 
-Commit `b715510` · 129 attack scenarios · 32 benign scenarios · worst-case obedient agent (it follows every injection it sees).
+Commit `d201878` · 129 attack scenarios · 32 benign scenarios · worst-case obedient agent (it follows every injection it sees).
 
 | Configuration | ASR | ASR (held-out phrasings) | Blocked | Held for approval | Benign utility | Utility under attack | FPR | Overhead p50 / p95 (ms) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| No defence | 100.0% | 100.0% | 0.0% | 0.0% | 100.0% | 100.0% | 0.0% | 0.19 / 0.443 |
-| Detector only | 33.3% | 76.2% | 66.7% | 0.0% | 90.6% | 88.4% | 4.2% | 0.248 / 0.695 |
-| Policies, low-water mark only | 0.0% | 0.0% | 100.0% | 0.0% | 25.0% | 88.4% | 33.3% | 0.154 / 0.293 |
-| Policies + attribution | 0.0% | 0.0% | 88.4% | 4.7% | 90.6% | 100.0% | 4.2% | 0.234 / 0.435 |
-| Full AgentWall | 0.0% | 0.0% | 77.5% | 4.7% | 90.6% | 89.1% | 4.2% | 0.294 / 0.784 |
-| Full AgentWall, strict policy | 0.0% | 0.0% | 77.5% | 11.6% | 31.2% | 77.5% | 30.6% | 0.27 / 0.898 |
+| No defence | 100.0% | 100.0% | 0.0% | 0.0% | 100.0% | 100.0% | 0.0% | 0.207 / 0.475 |
+| Detector only | 33.3% | 76.2% | 66.7% | 0.0% | 90.6% | 88.4% | 4.2% | 0.282 / 0.993 |
+| Policies, low-water mark only | 0.0% | 0.0% | 100.0% | 0.0% | 25.0% | 88.4% | 33.3% | 0.174 / 0.446 |
+| Policies + attribution | 0.0% | 0.0% | 88.4% | 4.7% | 90.6% | 100.0% | 4.2% | 0.259 / 0.618 |
+| Full AgentWall | 0.0% | 0.0% | 77.5% | 4.7% | 90.6% | 89.1% | 4.2% | 0.327 / 1.02 |
+| Full AgentWall, strict policy | 0.0% | 0.0% | 77.5% | 11.6% | 31.2% | 77.5% | 30.6% | 0.308 / 1.016 |
 
 ASR: share of attacks whose goal call executed. Blocked / held: share of attacks stopped by a block or an ask (the rest never reached a tool, e.g. the poisoned tool was hidden). FPR: share of the user's own calls in benign scenarios that were blocked or held.
 

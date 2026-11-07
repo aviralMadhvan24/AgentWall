@@ -70,7 +70,9 @@ control arguments; `any`: all). Masks from every matching redact rule apply when
 including after an approved `ask`. Provenance decides what is masked: a value the user typed is never
 masked, so "email my key sk-... to me" works, while the same key copied out of a file is masked.
 
-The default policy masks secrets in egress data (`secrets-stay-inside`). This closes a gap destination
+The default policy masks secrets in `read`, `write` and `egress` arguments, control arguments
+included (`secrets-stay-inside`): a credential in a fetched URL has already left, so restricting the
+rule to payload fields of egress tools would leave the easiest channel open. This closes a gap destination
 rules cannot: injected content asking the agent to paste a credential into an email to a contact the
 user named (harness category `secret_leak`). `redact_outputs` in the gateway config also masks the
 given kinds in tool outputs before they reach the agent.
@@ -184,7 +186,9 @@ wait_seconds: N}`) files a request in a JSON store that operators answer with
 - `--remember`: the decision (approve or deny) answers every future matching call.
 - `wait_seconds`: optionally wait for an answer before holding the call. No answer means no (fail
   closed). Repeated calls bump one pending request instead of filing new ones.
-- The store is written atomically, so the proxy, the CLI and the console can share it.
+- The store is written atomically, so the proxy, the CLI and the console can share it. Consuming a
+  one-time decision is a single locked read-modify-write, so of several calls waiting on the same
+  request exactly one proceeds.
 
 ## Quarantine (dual-LLM) mode
 
@@ -206,6 +210,12 @@ In the harness, the opt-in configuration `quarantine` (`--configs quarantine`) q
 0%). Utility with a real model must be measured with `--agent gemini`, where the model has to use the
 extract tool.
 
+Free-text types (`string`, `url`, `email`) are capped, screened by the detector, and share a
+1,200-character budget per call, and a call may request at most 16 fields; with no detector
+configured they are dropped rather than passed through unscreened. Errors from the extract tool are
+labelled with the session's low-water mark and never repeat the caller's own text, so a failed
+extract cannot launder an attacker-chosen address into a trusted span.
+
 Limit: quarantine covers tool outputs, not tool descriptions. A poisoned description the operator signed
 is still shown to the agent (1.6% of full-suite attacks under `quarantine`); manifests, the detector and
 policies handle that carrier, and those attacks are still blocked.
@@ -220,7 +230,10 @@ To make that possible the audit log records, per tool call, the full argument at
 4,096 characters, labels, sources, flags) and the other policy inputs (capability, argument roles,
 server label, allowlist), and a `span` event for everything that enters the context: labels, entities
 and detector flags, not the text, except the normalised text of user messages, which decides what stays
-trusted and what is never masked. `audit_spans: false` turns the span events off (the simulator then
+trusted and what is never masked. Credentials are masked in the logged values; `secret_kinds` records
+only the kinds the user did not type, which is what `args_contain_secrets` keys on, so replays agree
+without the log holding the secret. Calls whose session has no span events, or that refer to a span
+the log does not contain, are counted as not replayable rather than silently replayed. `audit_spans: false` turns the span events off (the simulator then
 cannot replay). Session ids carry a per-gateway random prefix so several gateways can share one log.
 
 Fidelity: replaying a log against the policy that produced it reproduces every decision; the test suite
@@ -247,7 +260,9 @@ expands to its arguments with labels and attribution method), a source → tool 
 by the most severe decision, pending approvals with approve/deny (once or remembered), and the active
 policy. Standard library only; it re-reads the audit log when it changes.
 
-Security: the page inserts all data with `textContent` (arguments are attacker-controlled) under a
+Security: `serve` mints a random token, prints it in the URL and requires it on every `/api/`
+request, so a local process (including an agent with an HTTP tool) cannot read the audit data or
+approve its own held calls. The page inserts all data with `textContent` (arguments are attacker-controlled) under a
 strict CSP with no inline script or style; the server answers only requests whose `Host` is the bound
 address (DNS rebinding), approval POSTs need an `X-AgentWall-Console: 1` header (cannot be sent
 cross-site without a preflight the server never grants), and binding beyond localhost prints a warning

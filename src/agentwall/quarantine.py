@@ -31,6 +31,10 @@ from agentwall.labels import Label
 EXTRACT_TOOL = "agentwall__extract"
 FIELD_TYPES = ("string", "number", "integer", "boolean", "date", "email", "url", "enum")
 DEFAULT_MAX_STRING = 120
+MAX_FIELDS = 16  # an unbounded field list is a free-text channel split across many small fields
+MAX_TOTAL_CHARS = 1200  # total text returned for one extract call
+MAX_URL = 200  # a URL is a fine place to hide a sentence, so cap it like a string
+MAX_EMAIL = 120
 
 _EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 _URL = re.compile(r"https?://[^\s<>\"']+")
@@ -79,18 +83,26 @@ class ExtractError(ValueError):
     pass
 
 
+def safe_name(name: Any) -> str:
+    """A caller-supplied field name, safe to repeat in an error message."""
+    text = "".join(ch for ch in str(name) if ch.isalnum() or ch in "_-")[:40]
+    return text or "?"
+
+
 def parse_fields(raw: Any) -> dict[str, FieldSpec]:
     if not isinstance(raw, dict) or not raw:
         raise ExtractError("fields must be a non-empty object of name -> {type: ...}")
+    if len(raw) > MAX_FIELDS:
+        raise ExtractError(f"too many fields: at most {MAX_FIELDS} per call")
     out = {}
     for name, spec in raw.items():
         if isinstance(spec, str):
             spec = {"type": spec}
         if not isinstance(spec, dict) or spec.get("type") not in FIELD_TYPES:
-            raise ExtractError(f"field {name!r}: type must be one of {FIELD_TYPES}")
+            raise ExtractError(f"field {safe_name(name)}: type must be one of {FIELD_TYPES}")
         options = tuple(str(o) for o in spec.get("options") or ())
         if spec["type"] == "enum" and not options:
-            raise ExtractError(f"field {name!r}: enum needs options")
+            raise ExtractError(f"field {safe_name(name)}: enum needs options")
         max_length = int(spec.get("max_length") or DEFAULT_MAX_STRING)
         out[str(name)] = FieldSpec(
             spec["type"],
@@ -102,19 +114,44 @@ def parse_fields(raw: Any) -> dict[str, FieldSpec]:
 
 
 def validate(
-    fields: dict[str, FieldSpec], raw: dict[str, Any], flagged: Callable[[str], bool] | None = None
+    fields: dict[str, FieldSpec],
+    raw: dict[str, Any],
+    flagged: Callable[[str], bool] | None = None,
+    have_detector: bool = True,
 ) -> dict[str, Any]:
-    """Keep only values that are exactly the declared type; everything else becomes None."""
+    """Keep only values that are exactly the declared type; everything else becomes None.
+
+    Free-text types (``string``, ``url``, ``email``) are capped and screened by the detector, and the
+    call as a whole may not return more than ``MAX_TOTAL_CHARS`` of text. Without a detector there is
+    nothing screening free text, so those types are dropped rather than passed through unchecked.
+    """
     out: dict[str, Any] = {}
+    budget = MAX_TOTAL_CHARS
     for name, spec in fields.items():
-        out[name] = _coerce(spec, raw.get(name), flagged)
+        value = _coerce(spec, raw.get(name), flagged, have_detector)
+        if isinstance(value, str):
+            if len(value) > budget:
+                value = None  # the call's text budget is spent
+            else:
+                budget -= len(value)
+        out[name] = value
     return out
 
 
-def _coerce(spec: FieldSpec, value: Any, flagged: Callable[[str], bool] | None) -> Any:
+FREE_TEXT = ("string", "url", "email")
+
+
+def _coerce(
+    spec: FieldSpec,
+    value: Any,
+    flagged: Callable[[str], bool] | None,
+    have_detector: bool = True,
+) -> Any:
     if value is None:
         return None
     t = spec.type
+    if t in FREE_TEXT and not have_detector:
+        return None
     try:
         if t == "boolean":
             if isinstance(value, bool):
@@ -134,9 +171,12 @@ def _coerce(spec: FieldSpec, value: Any, flagged: Callable[[str], bool] | None) 
         if t == "date":
             return date.fromisoformat(text).isoformat() if _DATE.fullmatch(text) else None
         if t == "email":
-            return text if _EMAIL.fullmatch(text) else None
+            ok = _EMAIL.fullmatch(text) and len(text) <= MAX_EMAIL
+            return text if ok and not (flagged and flagged(text)) else None
         if t == "url":
-            return text if _URL.fullmatch(text) else None
+            # Capped and screened like a string: a long URL carries a sentence just as well.
+            ok = _URL.fullmatch(text) and len(text) <= MAX_URL
+            return text if ok and not (flagged and flagged(text)) else None
         if t == "enum":
             match = [o for o in spec.options if o.lower() == text.lower()]
             return match[0] if match else None

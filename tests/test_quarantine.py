@@ -95,7 +95,7 @@ async def test_extracted_address_still_cannot_become_a_recipient():
 async def test_bad_requests_get_errors_not_crashes():
     _, session, _ = await _session()
     missing = await session.call_tool(EXTRACT_TOOL, {"handle": "Q9", "fields": {"a": "string"}})
-    assert missing.result.is_error and "no quarantined content" in missing.result.text
+    assert missing.result.is_error and "unknown handle" in missing.result.text
     bad = await session.call_tool(EXTRACT_TOOL, {"handle": "Q1", "fields": {"a": {"type": "html"}}})
     assert bad.result.is_error
 

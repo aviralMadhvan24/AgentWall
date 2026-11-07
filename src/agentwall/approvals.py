@@ -114,7 +114,11 @@ class ApprovalStore:
     # -- decisions -----------------------------------------------------------------------------
     def resolve(self, fp: str) -> bool | None:
         """A standing answer for this fingerprint: remembered, or an unused one-time approval
-        (which this call consumes). None means a human has to decide."""
+        (which this call consumes). None means a human has to decide.
+
+        Consuming is one locked read-modify-write, so two calls in flight cannot both spend the
+        same one-time approval.
+        """
         with self._lock:
             state = self._read()
             mine = [r for r in state.requests.values() if r.fingerprint == fp]
@@ -122,10 +126,10 @@ class ApprovalStore:
                 if r.remember and r.status != "pending":
                     return r.status == "approved"
             for r in mine:
-                if r.status == "approved" and not r.used:
+                if r.status != "pending" and not r.used:
                     r.used = True
                     self._write(state)
-                    return True
+                    return r.status == "approved"
         return None
 
     def submit(self, fp: str, ctx: CallContext, reasons: list[str]) -> ApprovalRequest:
@@ -193,11 +197,12 @@ class StoreApprover:
         deadline = time.monotonic() + self.wait_seconds
         while time.monotonic() < deadline:
             await anyio.sleep(min(self.poll_seconds, max(0.0, deadline - time.monotonic())))
-            current = self.store.get(req.id)
-            if current.status != "pending":
-                if current.status == "approved" and not current.remember:
-                    self.store.resolve(fp)  # consume the one-time approval for this call
-                return current.status == "approved", f"request {req.id} {current.status}"
+            # resolve() reads and consumes under one lock, so of several calls waiting on the same
+            # request exactly one can spend a one-time approval.
+            answer = self.store.resolve(fp)
+            if answer is not None:
+                verdict = "approved" if answer else "denied"
+                return answer, f"request {req.id} {verdict}"
         return False, (
             f"approval request {req.id} is waiting for the user. Ask them to run "
             f"`agentwall approvals approve {req.id}` (or use the console), then retry the same call."

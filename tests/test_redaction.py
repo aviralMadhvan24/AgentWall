@@ -102,15 +102,25 @@ async def test_secret_the_user_typed_is_not_masked():
     assert sink.outbox[0]["body"] == f"Key: {KEY}"
 
 
-async def test_control_arguments_are_not_masked_by_data_scope():
-    gateway, _ = await _gateway(pages={"https://news.example/markets": LEAKY_PAGE})
-    session = gateway.new_session()
-    session.add_user_message(f"Email the summary to {KEY}@example.com")  # odd, but user-typed
-    await session.call_tool("web__fetch_url", {"url": "https://news.example/markets"})
-    out = await session.call_tool(
-        "email__send_email", {"to": f"{KEY}@example.com", "subject": "x", "body": "hello"}
+def test_data_scope_skips_control_arguments():
+    """``scope: data`` leaves control arguments alone; the shipped rules use ``scope: any``."""
+    from agentwall.labels import TRUSTED_PUBLIC
+    from agentwall.policy.context import CallContext
+    from agentwall.policy.redact_args import in_scope
+    from agentwall.provenance.ledger import Ledger
+
+    ctx = CallContext(
+        server="email",
+        tool="send_email",
+        capability="egress",
+        attributions={},
+        ledger=Ledger(),
+        server_label=TRUSTED_PUBLIC,
+        control_args=("to",),
+        data_args=("body",),
     )
-    assert out.redactions == ()
+    assert not in_scope("to", ctx, "data") and in_scope("body", ctx, "data")
+    assert in_scope("to", ctx, "any")
 
 
 async def test_outputs_can_be_masked_before_the_agent_sees_them():

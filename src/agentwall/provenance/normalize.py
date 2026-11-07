@@ -10,6 +10,7 @@ import base64
 import binascii
 import re
 import unicodedata
+from urllib.parse import unquote
 
 # Zero-width and invisible formatting characters commonly used to split keywords.
 _INVISIBLE = dict.fromkeys(
@@ -66,8 +67,19 @@ def strip_invisible(text: str) -> str:
     return text.translate(_INVISIBLE)
 
 
+def percent_decode(text: str, rounds: int = 3) -> str:
+    """Undo percent-encoding, repeatedly but boundedly (``%2561`` hides a second layer)."""
+    for _ in range(rounds):
+        decoded = unquote(text)
+        if decoded == text:
+            break
+        text = decoded
+    return text
+
+
 def normalize(text: str) -> str:
-    """NFKC, drop invisible characters, casefold, map homoglyphs, collapse whitespace."""
+    """Percent-decode, NFKC, drop invisible chars, casefold, map homoglyphs, collapse whitespace."""
+    text = percent_decode(text)
     text = unicodedata.normalize("NFKC", text)
     text = strip_invisible(text)
     text = text.casefold().translate(_CONFUSABLES)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import sys
 import threading
 from dataclasses import asdict
@@ -27,6 +28,7 @@ CSP = (
     "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 )
 WRITE_HEADER = "X-AgentWall-Console"
+TOKEN_HEADER = "X-AgentWall-Token"
 MAX_BODY = 65536  # largest request body the console accepts
 MAX_DRAIN = 1 << 20  # largest oversized body read and discarded so the 413 still arrives
 
@@ -40,7 +42,11 @@ class ConsoleApp:
         approvals_path: str | Path | None = None,
         policy_text: str = "",
         policy_name: str = "",
+        token: str | None = None,
     ) -> None:
+        # Without a token any local process could read the audit data and approve held calls: the
+        # header and Host checks only stop browsers. ``serve`` always sets one.
+        self.token = token
         self.audit_path = Path(audit_path)
         self.store = ApprovalStore(approvals_path) if approvals_path else None
         self.policy_text = policy_text
@@ -117,6 +123,14 @@ def _handler(app: ConsoleApp, allowed_hosts: set[str]) -> type[BaseHTTPRequestHa
         def _json(self, status: int, data: Any) -> None:
             self._send(status, json.dumps(data, default=str).encode("utf-8"), "application/json")
 
+        def _authorised(self, path: str) -> bool:
+            if not path.startswith("/api/") or not app.token:
+                return True
+            if self.headers.get(TOKEN_HEADER) == app.token:
+                return True
+            self._json(HTTPStatus.UNAUTHORIZED, {"error": f"missing or wrong {TOKEN_HEADER}"})
+            return False
+
         def _host_ok(self) -> bool:
             # DNS-rebinding protection: only answer requests addressed to this server.
             if self.headers.get("Host", "") not in allowed_hosts:
@@ -128,6 +142,8 @@ def _handler(app: ConsoleApp, allowed_hosts: set[str]) -> type[BaseHTTPRequestHa
             if not self._host_ok():
                 return
             url = urlparse(self.path)
+            if not self._authorised(url.path):
+                return
             if url.path in STATIC:
                 name, content_type = STATIC[url.path]
                 body = (resources.files("agentwall.console") / "static" / name).read_bytes()
@@ -164,6 +180,8 @@ def _handler(app: ConsoleApp, allowed_hosts: set[str]) -> type[BaseHTTPRequestHa
                 return
             # A custom header cannot be sent cross-origin without a CORS preflight, which this
             # server never approves: other sites cannot click buttons for you.
+            if not self._authorised(urlparse(self.path).path):
+                return
             if self.headers.get(WRITE_HEADER) != "1":
                 self._json(HTTPStatus.FORBIDDEN, {"error": f"missing {WRITE_HEADER} header"})
                 return
@@ -190,13 +208,17 @@ def make_server(app: ConsoleApp, host: str = "127.0.0.1", port: int = 8765) -> T
 
 
 def serve(app: ConsoleApp, host: str = "127.0.0.1", port: int = 8765) -> None:
+    app.token = app.token or secrets.token_urlsafe(16)
     if host not in ("127.0.0.1", "localhost"):
         print(
             f"warning: the console has no login; binding to {host} exposes audit data on the network",
             file=sys.stderr,
         )
     server = make_server(app, host, port)
-    print(f"AgentWall console on http://{host}:{server.server_address[1]}  (Ctrl+C to stop)")
+    print(
+        f"AgentWall console on http://{host}:{server.server_address[1]}/?t={app.token}"
+        "  (open this exact link; Ctrl+C to stop)"
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

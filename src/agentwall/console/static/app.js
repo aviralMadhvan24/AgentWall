@@ -30,8 +30,13 @@ function svg(tag, attrs, ...children) {
 const badge = (action) => el("span", { class: `badge ${action}` }, LABEL[action] || action);
 const time = (ts) => (ts ? new Date(ts * 1000).toLocaleTimeString() : "");
 
+// The page is opened as /?t=<token>; every API call must carry it (see console/server.py).
+const TOKEN = new URLSearchParams(location.search).get("t") || "";
+
 async function api(path, options) {
-  const res = await fetch(path, options);
+  const opts = { ...(options || {}) };
+  opts.headers = { ...(opts.headers || {}), "X-AgentWall-Token": TOKEN };
+  const res = await fetch(path, opts);
   if (!res.ok) throw new Error(`${path}: ${res.status}`);
   return res.json();
 }
