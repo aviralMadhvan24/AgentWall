@@ -118,6 +118,10 @@ AgentWall in front of a real agent: one benign task out of sixteen fails, and it
 hard case (`benign_untrusted_target`, where the user asks to mail an address that exists only on an
 untrusted page).
 
+Rewriting does not change it either: an adaptive attacker given three phrasings per attack broke
+**0 of 15** seeds against the undefended model
+([results/adaptive-gemini/latest.md](results/adaptive-gemini/latest.md), 45 attempts).
+
 Two honest caveats. This is a small, inexpensive model on a corpus of fairly direct injections, and a
 single run of 34 attacks (the 95% interval for 0/34 still reaches 10%). A defence is worth having for
 the attacks a model *does* fall for, so the obedient-agent and adaptive numbers above remain the
