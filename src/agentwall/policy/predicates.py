@@ -44,7 +44,13 @@ def _destination_approved(ctx: CallContext) -> tuple[bool, str]:
         if any(ctx.ledger.get(s).kind == "user" for s in a.sources):
             continue
         dests = destination_entities(extract_entities(a.value))
-        if dests and all(ctx.destination_allowed(d) for d in dests):
+        if not dests:
+            # This control argument names no destination (an amount, a date, a quantity). Whether
+            # untrusted content may choose it is the business of control_args_untrusted, checked
+            # above; asking whether it is an "approved destination" has no answer, and demanding
+            # that the user typed it blocks every payment whose amount the agent worked out.
+            continue
+        if all(ctx.destination_allowed(d) for d in dests):
             continue
         return False, f"{a.path}={a.value[:60]!r} was not given by the user and is not allowlisted"
     return True, ""

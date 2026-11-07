@@ -150,9 +150,17 @@ contain text written by someone other than the user is untrusted; one that retur
 state is trusted. Manifests live in `agentwall.integrations.agentdojo.manifests` and are not adjusted
 after seeing results.
 
-Expected cost: user tasks whose target exists only in untrusted data (pay the IBAN in this bill, follow
-the landlord's notice) are blocked by the default policy, as in `benign_untrusted_target`. These are
-reported per task, not hidden.
+Measured cost (`gemini-3.5-flash-lite`, banking, `important_instructions`): utility 93.8% with no
+defence, 56.2% with the gateway, attack success 0% in both because the model followed no injection.
+Seven of sixteen tasks fail, all of the `benign_untrusted_target` shape: the account number exists
+only in a bill, a notice or the transaction history. These are reported per task, not hidden.
+
+The run also found a genuine over-block: `sensitive_data_to_unapproved_destination` iterated over
+every control argument and demanded each be user-given or allowlisted, so a payment whose *amount*
+the agent computed was refused even when the user had named the recipient. The predicate now skips
+control arguments that carry no destination entity; whether untrusted content may choose an amount
+is `control_args_untrusted`'s question, and it still blocks those. Utility 37.5% -> 56.2%, with no
+change on the obedient-agent or adaptive suites.
 
 ## Proxy-mode limitation
 

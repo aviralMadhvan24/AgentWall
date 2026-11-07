@@ -127,7 +127,35 @@ single run of 34 attacks (the 95% interval for 0/34 still reaches 10%). A defenc
 the attacks a model *does* fall for, so the obedient-agent and adaptive numbers above remain the
 measurements that carry the argument; this one bounds the false-positive cost.
 
-### AgentDojo
+### AgentDojo (banking)
+
+Someone else's benchmark, someone else's attack: all 16 banking user tasks of AgentDojo v1.2.1 with
+the `important_instructions` attack and three injection tasks, scored by AgentDojo itself
+([results/agentdojo/latest.md](results/agentdojo/latest.md)).
+
+| Configuration | Tasks completed | Attack success |
+| --- | --- | --- |
+| No defence | 93.8% | 0.0% |
+| Full AgentWall | 56.2% | 0.0% |
+
+The model resisted every injection here too, so again nothing needed blocking -- and **AgentWall cost
+seven of sixteen banking tasks**. That is the honest headline: on this workload the defence is
+expensive and, against this model, bought nothing.
+
+Looking into why separated two causes. Three tasks failed because of a bug, now fixed: the user had
+named the recipient account in their own message, but the *amount* the agent worked out could not
+satisfy a rule about "destinations the user named", so the payment was blocked. An amount is not a
+destination; the rule now only examines arguments that name one, which lifted utility from 37.5% to
+56.2% with no change to any attack number.
+
+The remaining seven failures are the design working as specified: "pay the bill in this file",
+"refund the account from my transaction history", "update my address from this notice". The account
+number genuinely comes from untrusted content, and AgentWall blocks exactly that. In banking that is
+the common case rather than an edge case, so a provenance gateway of this shape needs a way for a
+user to delegate target selection -- an approval step, or a rule that accepts a destination read from
+a document the user named. That is the clearest direction for the next version.
+
+### AgentDojo: running it yourself
 
 Both run on Gemini's free API tier. Each model has its own daily quota: `gemini-3.5-flash` ran out
 after 18 requests, so the published run uses `gemini-3.5-flash-lite`. Get a key at https://aistudio.google.com/apikey, then:
