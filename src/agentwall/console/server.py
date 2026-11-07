@@ -27,6 +27,8 @@ CSP = (
     "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 )
 WRITE_HEADER = "X-AgentWall-Console"
+MAX_BODY = 65536  # largest request body the console accepts
+MAX_DRAIN = 1 << 20  # largest oversized body read and discarded so the 413 still arrives
 
 
 class ConsoleApp:
@@ -135,6 +137,29 @@ def _handler(app: ConsoleApp, allowed_hosts: set[str]) -> type[BaseHTTPRequestHa
             self._json(status, data)
 
         def do_POST(self) -> None:
+            # Read the body before answering, even when the request will be refused: replying to a
+            # request whose body is still in flight aborts the connection instead of delivering the
+            # response (ConnectionAbortedError on Windows).
+            try:
+                declared = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                declared = -1
+            if declared < 0 or declared > MAX_BODY:
+                # Read and discard an oversized body (up to a bound) so the refusal is delivered
+                # rather than lost to a reset; past that bound, drop the connection instead.
+                if 0 <= declared <= MAX_DRAIN:
+                    remaining = declared
+                    while remaining > 0:
+                        chunk = self.rfile.read(min(remaining, 65536))
+                        if not chunk:
+                            break
+                        remaining -= len(chunk)
+                else:
+                    self.close_connection = True
+                self._json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": "body too large"})
+                return
+            raw = self.rfile.read(declared) if declared else b""
+
             if not self._host_ok():
                 return
             # A custom header cannot be sent cross-origin without a CORS preflight, which this
@@ -142,9 +167,8 @@ def _handler(app: ConsoleApp, allowed_hosts: set[str]) -> type[BaseHTTPRequestHa
             if self.headers.get(WRITE_HEADER) != "1":
                 self._json(HTTPStatus.FORBIDDEN, {"error": f"missing {WRITE_HEADER} header"})
                 return
-            length = min(int(self.headers.get("Content-Length") or 0), 65536)
             try:
-                body = json.loads(self.rfile.read(length) or b"{}")
+                body = json.loads(raw or b"{}")
             except json.JSONDecodeError:
                 self._json(400, {"error": "invalid JSON"})
                 return

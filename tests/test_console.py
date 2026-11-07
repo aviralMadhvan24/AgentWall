@@ -138,6 +138,39 @@ def test_approval_buttons_need_the_console_header(server):
     assert ApprovalStore(store_path).get(req.id).remember
 
 
+def test_oversized_body_is_refused_without_reading_it(server):
+    port, _ = server
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request(
+        "POST",
+        "/api/approvals/x",
+        body=b"{}" + b" " * 70000,
+        headers={"Host": f"127.0.0.1:{port}", "X-AgentWall-Console": "1"},
+    )
+    res = conn.getresponse()
+    assert res.status == 413
+    conn.close()
+
+
+def test_refused_posts_still_deliver_their_response(server):
+    # Answering before the body has been read aborts the connection on Windows.
+    port, store_path = server
+    (req,) = ApprovalStore(store_path).pending()
+    big = {"decision": "approve", "padding": "x" * 20000}
+    for _ in range(20):
+        assert _request(port, "POST", f"/api/approvals/{req.id}", big)[0].status == 403
+        assert (
+            _request(port, "POST", "/api/approvals/nope", big, {"X-AgentWall-Console": "1"})[
+                0
+            ].status
+            == 404
+        )
+        assert (
+            _request(port, "POST", f"/api/approvals/{req.id}", big, host="evil.example")[0].status
+            == 421
+        )
+
+
 def test_page_script_never_uses_html_injection():
     js = (resources.files("agentwall.console") / "static" / "app.js").read_text(encoding="utf-8")
     code = "\n".join(line for line in js.splitlines() if not line.strip().startswith("//"))
